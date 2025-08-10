@@ -12,11 +12,10 @@ class ModFetch:
     def __init__(self, config: dict):
         self.api = ModrinthClient()
         self.config = config
-        self.download_queue = asyncio.Queue()  # 改为asyncio.Queue以支持并发控制
+        self.download_queue = asyncio.Queue()
         self.processed_mods = set()
-        self.failed_downloads = []  # 新增：记录下载失败的文件
-        self.skipped_mods = []  # 新增：记录跳过的模组
-        # 新增：并发控制属性 [多线程下载]
+        self.failed_downloads = []
+        self.skipped_mods = []
         self.max_concurrent = config.get("max_concurrent", 5)  # 默认并发数
         if not isinstance(self.max_concurrent, int) or self.max_concurrent <= 0:
             print("[警告] max_concurrent 配置无效，将使用默认值 5。")
@@ -72,7 +71,7 @@ class ModFetch:
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=600) as response:  # 增加超时时间
+                async with session.get(url) as response:  # 增加超时时间
                     if response.status != 200:
                         # 抛出AiohttpClientResponseError，ModFetchError会在except捕获
                         response.raise_for_status()
