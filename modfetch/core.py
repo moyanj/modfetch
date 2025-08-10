@@ -214,7 +214,7 @@ class ModFetch:
         for url in self.config["extra_mod_urls"]:
             url = url.format(mc_version=version, loader=self.config["mod_loader"])
             filename = os.path.basename(url)
-            print(f"[*] 添加额外URL: {url}")
+            await self.safe_print(f"[*] 添加额外URL: {url}")
             await self.download_queue.put(
                 (url, filename, self.version_download_dir, None)
             )
