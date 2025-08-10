@@ -4,8 +4,9 @@ from modfetch.error import ModFetchError
 import aiohttp
 from typing import Optional
 import hashlib
-from tqdm.auto import tqdm  # 推荐使用 tqdm.auto 以获得更好的兼容性
+from tqdm.auto import tqdm
 import asyncio
+import aiofiles
 
 
 class ModFetch:
@@ -17,15 +18,15 @@ class ModFetch:
         self.failed_downloads = []  # 新增：记录下载失败的文件
         self.skipped_mods = []  # 新增：记录跳过的模组
 
-    def calc_sha1(self, file_path: str):
+    async def calc_sha1(self, file_path: str):
         """
         计算文件的SHA1值
         """
         sha1 = hashlib.sha1()
         try:
-            with open(file_path, "rb") as f:
+            async with aiofiles.open(file_path, "rb") as f:
                 while True:
-                    data = f.read(4096)
+                    data = await f.read(4096)
                     if not data:
                         break
                     sha1.update(data)
@@ -46,7 +47,7 @@ class ModFetch:
         file_path = os.path.join(download_dir, filename)
 
         if os.path.exists(file_path):
-            current_sha1 = self.calc_sha1(file_path)
+            current_sha1 = await self.calc_sha1(file_path)
             if expected_sha1 and current_sha1 == expected_sha1:
                 print(f"[跳过] 文件 '{filename}' 已存在且SHA1匹配。")
                 return
@@ -78,15 +79,15 @@ class ModFetch:
                         miniters=1,  # 确保小文件也能显示进度
                         leave=False,  # 下载完成后不保留进度条
                     ) as progress_bar:
-                        with open(file_path, "wb") as f:
+                        async with aiofiles.open(file_path, "wb") as f:
                             async for chunk in response.content.iter_chunked(4096):
                                 if chunk:
-                                    f.write(chunk)
+                                    await f.write(chunk)
                                     progress_bar.update(len(chunk))
 
             # 下载完成后验证SHA1
             if expected_sha1:
-                current_sha1 = self.calc_sha1(file_path)
+                current_sha1 = await self.calc_sha1(file_path)
                 if current_sha1 != expected_sha1:
                     os.remove(file_path)  # 删除损坏的文件
                     raise ModFetchError(f"文件 '{filename}' 下载后SHA1校验失败。")
