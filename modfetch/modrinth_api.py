@@ -9,7 +9,7 @@ class ModrinthClient:
 
     def __init__(self):
         self.session = aiohttp.ClientSession()
-        self.project_id_to_slug_cache = {}
+        # self.project_id_to_slug_cache = {} # 这个缓存目前未使用，可以暂时移除
 
     async def _request(
         self, endpoint: str, params: Optional[dict] = None
@@ -19,17 +19,20 @@ class ModrinthClient:
         ) as response:
             if response.status == 200:
                 return await response.json()
+            elif response.status == 404:
+                # 404不作为ModrinthError抛出，外部调用者可以据此判断资源不存在
+                return None
             else:
-                raise ModrinthError(f"Failed to fetch from Modrinth API", response)
+                # 对于其他非200/404的状态码，抛出ModrinthError
+                raise ModrinthError(
+                    f"从 Modrinth API 获取数据失败 (状态码: {response.status}，URL: {response.url})",
+                    response,
+                )
 
     async def get_project(self, idx: str):
         """通过slug或id获取模组项目详情。"""
-        try:
-            return await self._request(f"/project/{idx}")
-        except ModrinthError as e:
-            if e.response.status == 404:
-                return None
-            raise e
+        # _request 已经处理了404，所以这里可以直接返回其结果
+        return await self._request(f"/project/{idx}")
 
     async def get_version(
         self,
@@ -43,31 +46,29 @@ class ModrinthClient:
         如果指定 specific_version，则尝试查找该精确版本。
         返回 (version_data, primary_file_data)
         """
-        print(
-            f"-> 正在查找兼容版本 (项目ID: {idx}, MC: {mc_version}, 加载器: {mod_loader}, 指定版本: {specific_version or '最新'})..."
-        )
-
         params = {"game_versions": f'["{mc_version}"]', "loaders": f'["{mod_loader}"]'}
-        try:
-            versions = await self._request(f"/project/{idx}/version", params)
-        except ModrinthError as e:
-            if e.response.status == 404:
-                return None, None
-            raise e
+        versions = await self._request(f"/project/{idx}/version", params)
+
         if not versions:
-            print("  -> 找不到兼容的版本")
-            exit(1)
+            # 如果没有找到版本，_request会返回None，或者get_project返回None时，这里就无版本列表
             return None, None
 
         if specific_version:
             for version in versions:
                 if version["version_number"] == specific_version:
-                    return version, version["files"][0]
-            print(f"  -> 找不到指定版本 {specific_version}")
-            exit(1)
-            return None, None
+                    # 确保文件列表不为空
+                    if version.get("files"):
+                        return version, version["files"][0]
+                    # else:
+                    # print(f"  -> 找到指定版本 {specific_version} 但无可用文件。")
+            return None, None  # 找不到指定版本或无文件
+
         else:
-            return versions[0], versions[0]["files"][0]
+            # 返回最新版本（列表的第一个）的第一个文件
+            if versions and versions[0].get("files"):
+                return versions[0], versions[0]["files"][0]
+            return None, None  # 没有可用版本或文件
 
     async def close(self):
-        await self.session.close()
+        if not self.session.closed:
+            await self.session.close()
