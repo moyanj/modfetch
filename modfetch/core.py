@@ -165,9 +165,16 @@ class ModFetch:
         )
 
         for mod_cfg in self.config["mods"]:
-            mod_identifier = mod_cfg.get("id") or mod_cfg.get("slug")
+            # 支持两种配置格式：
+            # 1. 字符串格式: "a"
+            # 2. 字典格式: {"slug": "a"} 或 {"id": "b"}
+            if isinstance(mod_cfg, str):
+                mod_identifier = mod_cfg
+            else:  # 字典格式
+                mod_identifier = mod_cfg.get("id") or mod_cfg.get("slug")
+
             if not mod_identifier:
-                print(f"[跳过] 配置文件中模组条目缺少 'id' 或 'slug'，跳过: {mod_cfg}")
+                print(f"[跳过] 模组条目缺少标识符: {mod_cfg}")
                 self.skipped_mods.append(f"配置错误模组: {mod_cfg}")
                 continue
 
@@ -208,9 +215,21 @@ class ModFetch:
             raise ModFetchError(
                 "配置错误：'mod_loader' 只支持 'forge', 'fabric', 'quilt'。"
             )
-        for mod in self.config["mods"]:
-            if not mod.get("slug") and not mod.get("id"):
-                raise ModFetchError("配置错误：每个模组条目必须指定 'slug' 或 'id'。")
+
+        # 支持两种格式: ["a", "b"] 或 [{"slug": "a"}, {"id": "b"}]
+        for idx, mod in enumerate(self.config["mods"]):
+            if isinstance(mod, str):
+                continue  # 字符串格式直接接受
+            elif isinstance(mod, dict) and (mod.get("slug") or mod.get("id")):
+                continue  # 字典格式需要slug或id
+            else:
+                # 详细错误信息
+                error_msg = f"配置错误：模组条目 #{idx+1} 应该是一个字符串或包含 'slug' 或 'id' 的字典"
+                if isinstance(mod, dict):
+                    error_msg += f"，但得到: {mod}"
+                else:
+                    error_msg += f"，但得到类型: {type(mod).__name__}"
+                raise ModFetchError(error_msg)
 
     async def start(self):
         try:

@@ -7,22 +7,10 @@ mod_loader = "fabric"
 # 模组下载目录，程序将在此目录下创建 'mods' 文件夹
 download_dir = "./downloads/fabric-1.20.1-mods" # 这是该配置文件的特定下载目录
 
-# Modrinth 模组列表。
-# 每个模组用一个表格表示，包含 'slug'。
-# 'version' 是可选的，如果指定，将下载该精确版本；
-# 否则，将下载最新兼容版本。
-[[mods]]
-slug = "sodium"
+mods = [
+    "sodium",
+    "iris",       # Iris 依赖 Sodium
+    "lithium",
+    "fabric-api", # 一个常见的 Fabric 模组依赖
 
-[[mods]]
-slug = "iris"
-# 没有指定版本，将下载最新兼容的 Iris
-
-[[mods]]
-slug = "lithium"
-
-[[mods]]
-slug = "fabric-api"
-
-[[mods]]
-slug = "betterf3"
+]
