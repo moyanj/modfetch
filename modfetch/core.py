@@ -208,6 +208,14 @@ class ModFetch:
                 # else:  # 根据需要决定是否打印已处理的依赖跳过信息
                 # await self.safe_print(f"    - 依赖 '{dep_project_id}' 已处理过，跳过。")
 
+    async def process_extra_urls(self):
+        for url in self.config["extra_urls"]:
+            filename = os.path.basename(url)
+
+            await self.download_queue.put(
+                (url, filename, self.version_download_dir, None)
+            )
+
     async def version_process(self, version: str):
         """
         处理单个版本

@@ -1,16 +1,31 @@
 # Minecraft 版本，例如 "1.20.1"
-mc_version = ["1.20.1"]
+mc_version = ["1.20.1", "1.21.7"]
 
-# 模组加载器，可选值: "fabric", "forge", "quilt" 等
+# 模组加载器，可选值: "fabric", "forge", "quilt"
 mod_loader = "fabric"
 
 # 模组下载目录，程序将在此目录下创建 'mods' 文件夹
-download_dir = "./downloads" # 这是该配置文件的特定下载目录
-
+download_dir = "./downloads"
 mods = [
-    "sodium",
-    "iris",       # Iris 依赖 Sodium
+    "rei",
+    "betterf3",
+    "journeymap",
+    "imblocker",
+    "inventory-profiles-next",
+    "appleskin",
+    "blur-plus",
+    "chat-heads",
+    "dynamic-fps",
+    "entityculling",
+    "fabric-api",
+    "ferrite-core",
+    "iris",
+    "jade",
     "lithium",
-    "fabric-api", # 一个常见的 Fabric 模组依赖
-
+    "modmenu",
+    "mouse-tweaks",
+    "reeses-sodium-options",
+    "sodium-extra",
+    "sodium",
+    "sound-physics-remastered",
 ]
