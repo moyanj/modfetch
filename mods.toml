@@ -3,7 +3,8 @@ mc_version = ["1.20.1", "1.21.7"]
 
 # 模组加载器，可选值: "fabric", "forge", "quilt"
 mod_loader = "fabric"
-
+# 是否压缩
+compress = true
 # 模组下载目录，程序将在此目录下创建 'mods' 文件夹
 download_dir = "./downloads"
 mods = [

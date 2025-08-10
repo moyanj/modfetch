@@ -1,4 +1,3 @@
-from unittest import loader
 from modfetch.modrinth_api import ModrinthClient
 import os
 from modfetch.error import ModFetchError
@@ -7,6 +6,7 @@ from typing import Optional
 import hashlib
 import asyncio
 import aiofiles
+import shutil
 
 
 class ModFetch:
@@ -178,7 +178,9 @@ class ModFetch:
         url = file_info["url"]
         sha1 = file_info.get("hashes", {}).get("sha1")
 
-        await self.download_queue.put((url, filename, self.version_download_dir, sha1))
+        await self.download_queue.put(
+            (url, filename, self.version_download_dir + "/mods", sha1)
+        )
         self.processed_mods.add(mod_id)
         await self.safe_print(
             f"    - '{mod_slug}' (版本: {version_info['version_number']}) 已加入下载队列。"
@@ -211,13 +213,43 @@ class ModFetch:
                 # await self.safe_print(f"    - 依赖 '{dep_project_id}' 已处理过，跳过。")
 
     async def process_extra_urls(self, version):
-        for url in self.config["extra_mod_urls"]:
+        for extar_url in self.config.get("extra_urls", []):
+            if isinstance(extar_url, str):
+                url = extar_url
+                type = "file"
+                filename = None
+
+            elif isinstance(extar_url, dict):
+                if need_ver := extar_url.get("only_version"):
+                    if need_ver != version:
+                        continue
+
+                type = extar_url.get("type", "file")
+                if type not in ["mod", "file", "resourcepack", "shaderpack"]:
+                    await self.safe_print(
+                        f"[警告] 忽略未知的额外URL类型: {type}，请检查配置文件。"
+                    )
+                url = extar_url["url"]
+                filename = extar_url.get("filename")
+            else:
+                print(f"[警告] 忽略无效的额外URL配置: {extar_url}")
+                continue
+
             url = url.format(mc_version=version, loader=self.config["mod_loader"])
-            filename = os.path.basename(url)
+            filename = filename or os.path.basename(url)
+
+            download_path = ""
+            if type == "file":
+                download_path = self.version_download_dir
+            elif type == "mod":
+                download_path = self.version_download_dir + "/mods"
+            elif type == "resourcepack":
+                download_path = self.version_download_dir + "/resourcepacks"
+            elif type == "shaderpack":
+                download_path = self.version_download_dir + "/shaderpacks"
+
             await self.safe_print(f"[*] 添加额外URL: {url}")
-            await self.download_queue.put(
-                (url, filename, self.version_download_dir, None)
-            )
+            await self.download_queue.put((url, filename, download_path, None))
 
     async def version_process(self, version: str):
         """
@@ -276,7 +308,7 @@ class ModFetch:
                 )
             )
 
-        # 等待下���队列中的所有任务都被处理完毕
+        # 等待下载队列中的所有任务都被处理完毕
         await self.download_queue.join()
 
         # 队列中的所有任务完成后，取消所有工作线程
@@ -321,6 +353,12 @@ class ModFetch:
                     error_msg += f"，但得到类型: {type(mod).__name__}"
                 raise ModFetchError(error_msg)
 
+    async def compress_mods(self):
+        for dirx in os.listdir(self.config["download_dir"]):
+            shutil.make_archive(
+                dirx, "zip", os.path.join(self.config["download_dir"], dirx)
+            )
+
     async def start(self):
         try:
             self.validate_config()
@@ -335,6 +373,9 @@ class ModFetch:
 
             # 统一执行下载
             await self.download_loop()
+
+            if self.config.get("compress"):
+                await self.compress_mods()
 
             await self.api.close()
             await self.safe_print("\n--- ModFetch 所有任务完成 ---")
