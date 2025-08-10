@@ -38,7 +38,7 @@ class ModrinthClient:
         self,
         idx: str,
         mc_version: str,
-        mod_loader: str,
+        mod_loader: Optional[str] = None,
         specific_version: Optional[str] = None,
     ) -> tuple[dict | None, dict | None]:
         """
@@ -46,7 +46,9 @@ class ModrinthClient:
         如果指定 specific_version，则尝试查找该精确版本。
         返回 (version_data, primary_file_data)
         """
-        params = {"game_versions": f'["{mc_version}"]', "loaders": f'["{mod_loader}"]'}
+        params = {"game_versions": f'["{mc_version}"]'}
+        if mod_loader:
+            params["loaders"] = f'["{mod_loader}"]'
         versions = await self._request(f"/project/{idx}/version", params)
 
         if not versions:

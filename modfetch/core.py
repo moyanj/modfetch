@@ -1,3 +1,5 @@
+from ast import mod
+from multiprocessing.shared_memory import SharedMemory
 from modfetch.modrinth_api import ModrinthClient
 import os
 from modfetch.error import ModFetchError
@@ -151,12 +153,12 @@ class ModFetch:
                 # 每次处理完一个任务（无论成功失败）都要标记任务完成
                 self.download_queue.task_done()
 
-    async def process_mod(self, mod_id: str, version: str):
-        if mod_id in self.processed_mods:
+    async def process_mod(self, project_info: dict, version: str):
+        mod_id = project_info.get("id")
+        if mod_id in self.processed_mods or not mod_id:
             # await self.safe_print(f"[跳过] '{mod_id}' 已处理，跳过。")
             return
 
-        project_info = await self.api.get_project(mod_id)
         mod_slug = project_info.get("slug") if project_info else mod_id
 
         await self.safe_print(f"[*] 正在分析模组: '{mod_slug}' (ID: {mod_id})")
@@ -251,6 +253,60 @@ class ModFetch:
             await self.safe_print(f"[*] 添加额外URL: {url}")
             await self.download_queue.put((url, filename, download_path, None))
 
+    async def process_shaderpacks(self, project_info, version):
+        shaderpack_id = project_info["id"]
+        mod_slug = project_info.get("slug") if project_info else shaderpack_id
+        await self.safe_print(f"[*] 添加光影包: '{mod_slug}' (ID: {shaderpack_id})")
+
+        version_info, file_info = await self.api.get_version(shaderpack_id, version)
+        if not version_info or not file_info:
+            await self.safe_print(
+                f"[跳过] 无法获取资源包 '{mod_slug}' 的版本信息或文件，跳过。"
+            )
+            self.skipped_mods.append(
+                f"{mod_slug} (ID: {shaderpack_id}) - 在 {version} 无可用版本"
+            )
+            return
+
+        filename = file_info["filename"]
+        url = file_info["url"]
+        sha1 = file_info.get("hashes", {}).get("sha1")
+
+        await self.download_queue.put(
+            (url, filename, self.version_download_dir + "/shaderpacks", sha1)
+        )
+
+        await self.safe_print(
+            f"    - '{mod_slug}' (版本: {version_info['version_number']}) 已加入下载队列。"
+        )
+
+    async def process_resourcepacks(self, project_info, version):
+        resourcepack_id = project_info["id"]
+        mod_slug = project_info.get("slug") if project_info else resourcepack_id
+        await self.safe_print(f"[*] 添加资源包: '{mod_slug}' (ID: {resourcepack_id})")
+
+        version_info, file_info = await self.api.get_version(resourcepack_id, version)
+        if not version_info or not file_info:
+            await self.safe_print(
+                f"[跳过] 无法获取资源包 '{mod_slug}' 的版本信息或文件，跳过。"
+            )
+            self.skipped_mods.append(
+                f"{mod_slug} (ID: {resourcepack_id}) - 在 {version} 无可用版本"
+            )
+            return
+
+        filename = file_info["filename"]
+        url = file_info["url"]
+        sha1 = file_info.get("hashes", {}).get("sha1")
+
+        await self.download_queue.put(
+            (url, filename, self.version_download_dir + "/resourcepacks", sha1)
+        )
+
+        await self.safe_print(
+            f"    - '{mod_slug}' (版本: {version_info['version_number']}) 已加入下载队列。"
+        )
+
     async def version_process(self, version: str):
         """
         处理单个版本
@@ -263,32 +319,30 @@ class ModFetch:
             f"\n正在为 Minecraft {version} ({self.config['mod_loader']}) 准备下载目录: {self.version_download_dir}"
         )
 
-        for mod_cfg in self.config["mods"]:
-            # 支持两种配置格式：
-            # 1. 字符串格式: "a"
-            # 2. 字典格式: {"slug": "a"} 或 {"id": "b"}
-            if isinstance(mod_cfg, str):
-                mod_identifier = mod_cfg
-            else:  # 字典格式
-                mod_identifier = mod_cfg.get("id") or mod_cfg.get("slug")
+        for mod_id in self.config.get("mods", []):
 
-            if not mod_identifier:
-                await self.safe_print(f"[跳过] 模组条目缺少标识符: {mod_cfg}")
-                self.skipped_mods.append(f"配置错误模组: {mod_cfg}")
-                continue
-
-            project_info = await self.api.get_project(mod_identifier)
+            project_info = await self.api.get_project(mod_id)
             if not project_info:
-                await self.safe_print(
-                    f"[跳过] 无法找到模组: '{mod_identifier}'，跳过。"
-                )
-                self.skipped_mods.append(f"未找到模组: {mod_identifier}")
+                await self.safe_print(f"[跳过] 无法找到模组: '{mod_id}'，跳过。")
+                self.skipped_mods.append(f"未在 {version} 找到模组: {mod_id}")
                 continue
 
             mod_id = project_info["id"]  # 使用ID进行内部处理
-            # mod_slug = project_info["slug"] # process_mod内部会获取并打印slug
 
-            await self.process_mod(mod_id, version)
+            await self.process_mod(project_info, version)
+
+        for resourcepack_id in self.config.get("resourcepacks", []):
+            project_info = await self.api.get_project(resourcepack_id)
+            if not project_info:
+                await self.safe_print(
+                    f"[跳过] 无法找到资源包: '{resourcepack_id}'，跳过。"
+                )
+                self.skipped_mods.append(
+                    f"未在 {version} 找到资源包: {resourcepack_id}"
+                )
+                continue
+            await self.process_resourcepacks(project_info, version)
+
         await self.process_extra_urls(version)
 
     async def download_loop(self):
