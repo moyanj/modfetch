@@ -1,3 +1,4 @@
+from unittest import loader
 from modfetch.modrinth_api import ModrinthClient
 import os
 from modfetch.error import ModFetchError
@@ -23,7 +24,7 @@ class ModFetch:
         self.print_lock = asyncio.Lock()  # 输出锁防止日志交叉
 
     # 新增：安全的日志输出方法
-    async def safe_print(self, message: str):
+    async def safe_print(self, message):
         async with self.print_lock:
             print(message)
 
@@ -137,12 +138,10 @@ class ModFetch:
         while True:
             try:
                 # 从队列获取任务，设置一个较短的超时，当队列长时间为空时退出
-                item = await asyncio.wait_for(self.download_queue.get(), timeout=2.0)
-                url, filename, download_dir, sha1 = item
+                url, filename, download_dir, sha1 = await self.download_queue.get()
                 await self.download_file(url, filename, download_dir, sha1)
-            except asyncio.TimeoutError:
-                # 队列长时间为空，表示所有任务可能已分发或完成
-                break
+                if self.download_queue.empty():
+                    break
             except asyncio.CancelledError:
                 # 任务被取消，退出循环 (用于关闭工作线程)
                 break
@@ -154,6 +153,7 @@ class ModFetch:
 
     async def process_mod(self, mod_id: str, version: str):
         if mod_id in self.processed_mods:
+            # await self.safe_print(f"[跳过] '{mod_id}' 已处理，跳过。")
             return
 
         project_info = await self.api.get_project(mod_id)
@@ -167,9 +167,11 @@ class ModFetch:
 
         if not version_info or not file_info:
             await self.safe_print(
-                f"[跳过] ��法获取模组 '{mod_slug}' 的版本信息或文件，跳过。"
+                f"[跳过] 无法获取模组 '{mod_slug}' 的版本信息或文件，跳过。"
             )
-            self.skipped_mods.append(f"{mod_slug} (ID: {mod_id}) - 无可用版本")
+            self.skipped_mods.append(
+                f"{mod_slug} (ID: {mod_id}) - 在 {version} 无可用版本"
+            )
             return
 
         filename = file_info["filename"]
@@ -208,10 +210,11 @@ class ModFetch:
                 # else:  # 根据需要决定是否打印已处理的依赖跳过信息
                 # await self.safe_print(f"    - 依赖 '{dep_project_id}' 已处理过，跳过。")
 
-    async def process_extra_urls(self):
-        for url in self.config["extra_urls"]:
+    async def process_extra_urls(self, version):
+        for url in self.config["extra_mod_urls"]:
+            url = url.format(mc_version=version, loader=self.config["mod_loader"])
             filename = os.path.basename(url)
-
+            print(f"[*] 添加额外URL: {url}")
             await self.download_queue.put(
                 (url, filename, self.version_download_dir, None)
             )
@@ -254,6 +257,7 @@ class ModFetch:
             # mod_slug = project_info["slug"] # process_mod内部会获取并打印slug
 
             await self.process_mod(mod_id, version)
+        await self.process_extra_urls(version)
 
     async def download_loop(self):
         """
@@ -326,7 +330,6 @@ class ModFetch:
                     f"\n正在分析 Minecraft 版本 {version} 的模组及其依赖..."
                 )
                 self.processed_mods.clear()  # 每个版本重新计算已处理模组
-                self.download_queue = asyncio.Queue()  # 为每个版本初始化新的下载队列
                 await self.version_process(version)
                 await self.safe_print(f"版本 {version} 的模组分析完毕。")
 
