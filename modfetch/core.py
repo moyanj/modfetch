@@ -4,7 +4,6 @@ from modfetch.error import ModFetchError
 import aiohttp
 from typing import Optional
 import hashlib
-from tqdm.auto import tqdm
 import asyncio
 import aiofiles
 
@@ -17,6 +16,17 @@ class ModFetch:
         self.processed_mods = set()
         self.failed_downloads = []  # 新增：记录下载失败的文件
         self.skipped_mods = []  # 新增：记录跳过的模组
+        # 新增：并发控制属性 [多线程下载]
+        self.max_concurrent = config.get("max_concurrent", 5)  # 默认并发数
+        if not isinstance(self.max_concurrent, int) or self.max_concurrent <= 0:
+            print("[警告] max_concurrent 配置无效，将使用默认值 5。")
+            self.max_concurrent = 5
+        self.print_lock = asyncio.Lock()  # 输出锁防止日志交叉
+
+    # 新增：安全的日志输出方法
+    async def safe_print(self, message: str):
+        async with self.print_lock:
+            print(message)
 
     async def calc_sha1(self, file_path: str):
         """
@@ -42,48 +52,68 @@ class ModFetch:
         expected_sha1: Optional[str] = None,
     ):
         """
-        下载单个文件
+        下载单个文件 (支持并发)
         """
         file_path = os.path.join(download_dir, filename)
 
         if os.path.exists(file_path):
             current_sha1 = await self.calc_sha1(file_path)
             if expected_sha1 and current_sha1 == expected_sha1:
-                print(f"[跳过] 文件 '{filename}' 已存在且SHA1匹配。")
+                await self.safe_print(f"[跳过] 文件 '{filename}' 已存在且SHA1匹配。")
                 return
             elif expected_sha1 and current_sha1 != expected_sha1:
-                print(f"[警告] 文件 '{filename}' 已存在，但SHA1不匹配，将重新下载。")
+                await self.safe_print(
+                    f"[警告] 文件 '{filename}' 已存在，但SHA1不匹配，将重新下载。"
+                )
                 os.remove(file_path)  # 删除旧文件以便重新下载
             else:
-                print(f"[跳过] 文件 '{filename}' 已存在。")
+                await self.safe_print(f"[跳过] 文件 '{filename}' 已存在。")
                 return
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
+                async with session.get(url, timeout=600) as response:  # 增加超时时间
                     if response.status != 200:
-                        response.raise_for_status()  # 抛出AiohttpClientResponseError
-                        # raise ModFetchError( # 如果需要自定义错误消息
-                        #     f"下载文件 '{filename}' 失败，状态码 {response.status}"
-                        # )
+                        # 抛出AiohttpClientResponseError，ModFetchError会在except捕获
+                        response.raise_for_status()
 
                     total_size = int(response.headers.get("content-length", 0))
 
-                    # 使用 tqdm 创建进度条
-                    with tqdm(
-                        total=total_size,
-                        unit="B",
-                        unit_scale=True,
-                        unit_divisor=1024,
-                        desc=f"下载 {filename}",
-                        miniters=1,  # 确保小文件也能显示进度
-                        leave=False,  # 下载完成后不保留进度条
-                    ) as progress_bar:
-                        async with aiofiles.open(file_path, "wb") as f:
-                            async for chunk in response.content.iter_chunked(4096):
-                                if chunk:
-                                    await f.write(chunk)
-                                    progress_bar.update(len(chunk))
+                    # 简化多线程下载时的进度显示，避免进度条混乱
+                    size_mb = total_size / (1024 * 1024) if total_size > 0 else 0
+                    await self.safe_print(f"[下载] 开始: {filename} ({size_mb:.2f} MB)")
+
+                    async with aiofiles.open(file_path, "wb") as f:
+                        downloaded_size = 0
+                        last_reported_progress = 0  # 记录上次报告的进度百分比
+
+                        async for chunk in response.content.iter_chunked(
+                            8192
+                        ):  # 增加分块大小
+                            if chunk:
+                                await f.write(chunk)
+                                downloaded_size += len(chunk)
+
+                                # 每隔一定百分比（例如10%）或下载到一定大小（例如5MB）报告一次进度
+                                if total_size > 0:
+                                    current_progress_percent = (
+                                        downloaded_size / total_size
+                                    ) * 100
+                                    if (
+                                        current_progress_percent
+                                        - last_reported_progress
+                                        >= 5
+                                    ):  # 每5%报告一次
+                                        await self.safe_print(
+                                            f"[进度] {filename}: {current_progress_percent:.1f}%"
+                                        )
+                                        last_reported_progress = (
+                                            current_progress_percent
+                                        )
+
+                    # 确保下载完成时报告最终进度
+                    if total_size > 0 and downloaded_size == total_size:
+                        await self.safe_print(f"[进度] {filename}: 100.0%")
 
             # 下载完成后验证SHA1
             if expected_sha1:
@@ -92,14 +122,36 @@ class ModFetch:
                     os.remove(file_path)  # 删除损坏的文件
                     raise ModFetchError(f"文件 '{filename}' 下载后SHA1校验失败。")
 
-            print(f"[完成] 文件 '{filename}' 下载成功。")
+            await self.safe_print(f"[完成] 文件 '{filename}' 下载成功。")
         except Exception as e:
             # 如果下载失败，删除可能已创建的不完整文件
             if os.path.exists(file_path):
                 os.remove(file_path)
             self.failed_downloads.append(filename)  # 记录失败
-            print(f"[错误] 下载文件 '{filename}' 时出错: {e}")
+            await self.safe_print(f"[错误] 下载文件 '{filename}' 时出错: {e}")
             # 不再重新抛出，而是记录并继续
+
+    async def download_worker(self):
+        """
+        并发下载任务的工作线程
+        """
+        while True:
+            try:
+                # 从队列获取任务，设置一个较短的超时，当队列长时间为空时退出
+                item = await asyncio.wait_for(self.download_queue.get(), timeout=2.0)
+                url, filename, download_dir, sha1 = item
+                await self.download_file(url, filename, download_dir, sha1)
+            except asyncio.TimeoutError:
+                # 队列长时间为空，表示所有任务可能已分发或完成
+                break
+            except asyncio.CancelledError:
+                # 任务被取消，退出循环 (用于关闭工作线程)
+                break
+            except Exception as e:
+                await self.safe_print(f"[工作线程错误] 处理任务时发生意外: {e}")
+            finally:
+                # 每次处理完一个任务（无论成功失败）都要标记任务完成
+                self.download_queue.task_done()
 
     async def process_mod(self, mod_id: str, version: str):
         if mod_id in self.processed_mods:
@@ -108,14 +160,16 @@ class ModFetch:
         project_info = await self.api.get_project(mod_id)
         mod_slug = project_info.get("slug") if project_info else mod_id
 
-        print(f"[*] 正在分析模组: '{mod_slug}' (ID: {mod_id})")
+        await self.safe_print(f"[*] 正在分析模组: '{mod_slug}' (ID: {mod_id})")
 
         version_info, file_info = await self.api.get_version(
             mod_id, version, self.config["mod_loader"]
         )
 
         if not version_info or not file_info:
-            print(f"[跳过] 无法获取模组 '{mod_slug}' 的版本信息或文件，跳过。")
+            await self.safe_print(
+                f"[跳过] ��法获取模组 '{mod_slug}' 的版本信息或文件，跳过。"
+            )
             self.skipped_mods.append(f"{mod_slug} (ID: {mod_id}) - 无可用版本")
             return
 
@@ -125,7 +179,7 @@ class ModFetch:
 
         await self.download_queue.put((url, filename, self.version_download_dir, sha1))
         self.processed_mods.add(mod_id)
-        print(
+        await self.safe_print(
             f"    - '{mod_slug}' (版本: {version_info['version_number']}) 已加入下载队列。"
         )
 
@@ -139,19 +193,21 @@ class ModFetch:
                     dep_project = await self.api.get_project(dep_project_id)
                     if dep_project:
                         dep_slug = dep_project["slug"]
-                        print(
+                        await self.safe_print(
                             f"    - 发现必需依赖: '{dep_slug}' (ID: {dep_project_id})"
                         )
                         await self.process_mod(
                             dep_project_id, version
                         )  # 递归处理依赖项
                     else:
-                        print(f"[警告] 无法获取必需依赖 '{dep_project_id}' 的详情。")
+                        await self.safe_print(
+                            f"[警告] 无法获取必需依赖 '{dep_project_id}' 的详情。"
+                        )
                         self.skipped_mods.append(
                             f"依赖 {dep_project_id} - 无法获取详情"
                         )
                 # else:  # 根据需要决定是否打印已处理的依赖跳过信息
-                # print(f"    - 依赖 '{dep_project_id}' 已处理过，跳过。")
+                # await self.safe_print(f"    - 依赖 '{dep_project_id}' 已处理过，跳过。")
 
     async def version_process(self, version: str):
         """
@@ -161,7 +217,7 @@ class ModFetch:
             self.config["download_dir"], f"{version}-{self.config['mod_loader']}"
         )
         os.makedirs(self.version_download_dir, exist_ok=True)
-        print(
+        await self.safe_print(
             f"\n正在为 Minecraft {version} ({self.config['mod_loader']}) 准备下载目录: {self.version_download_dir}"
         )
 
@@ -175,13 +231,15 @@ class ModFetch:
                 mod_identifier = mod_cfg.get("id") or mod_cfg.get("slug")
 
             if not mod_identifier:
-                print(f"[跳过] 模组条目缺少标识符: {mod_cfg}")
+                await self.safe_print(f"[跳过] 模组条目缺少标识符: {mod_cfg}")
                 self.skipped_mods.append(f"配置错误模组: {mod_cfg}")
                 continue
 
             project_info = await self.api.get_project(mod_identifier)
             if not project_info:
-                print(f"[跳过] 无法找到模组: '{mod_identifier}'，跳过。")
+                await self.safe_print(
+                    f"[跳过] 无法找到模组: '{mod_identifier}'，跳过。"
+                )
                 self.skipped_mods.append(f"未找到模组: {mod_identifier}")
                 continue
 
@@ -191,13 +249,33 @@ class ModFetch:
             await self.process_mod(mod_id, version)
 
     async def download_loop(self):
-        print(f"\n开始下载队列中的模组...")
-        while not self.download_queue.empty():
-            url, filename, download_dir, sha1 = await self.download_queue.get()
-            await self.download_file(url, filename, download_dir, sha1)
+        """
+        启动并发下载工作线程并等待所有任务完成
+        """
+        await self.safe_print(
+            f"\n开始下载队列中的模组 (并发数: {self.max_concurrent})..."
+        )
 
-        # 并发下载，限制并发数量（例如：5个）
-        # await asyncio.gather(*tasks)  # 这里未限制并发，所有文件同时开始，tqdm会交叉显示
+        # 创建并启动指定数量的下载工作线程
+        tasks = []
+        for i in range(self.max_concurrent):
+            tasks.append(
+                asyncio.create_task(
+                    self.download_worker(), name=f"downloader-worker-{i+1}"
+                )
+            )
+
+        # 等待下���队列中的所有任务都被处理完毕
+        await self.download_queue.join()
+
+        # 队列中的所有任务完成后，取消所有工作线程
+        for task in tasks:
+            task.cancel()
+
+        # 等待所有工作线程实际结束
+        await asyncio.gather(
+            *tasks, return_exceptions=True
+        )  # return_exceptions=True 避免由于 CancelledError 终止 gather
 
     def validate_config(self):
         """
@@ -235,34 +313,37 @@ class ModFetch:
     async def start(self):
         try:
             self.validate_config()
-            print("--- ModFetch 下载器启动 ---")
+            await self.safe_print("--- ModFetch 下载器启动 ---")
             for version in self.config["mc_version"]:
-                print(f"\n正在分析 Minecraft 版本 {version} 的模组及其依赖...")
+                await self.safe_print(
+                    f"\n正在分析 Minecraft 版本 {version} 的模组及其依赖..."
+                )
                 self.processed_mods.clear()  # 每个版本重新计算已处理模组
+                self.download_queue = asyncio.Queue()  # 为每个版本初始化新的下载队列
                 await self.version_process(version)
-                print(f"版本 {version} 的模组分析完毕。")
+                await self.safe_print(f"版本 {version} 的模组分析完毕。")
 
             # 统一执行下载
             await self.download_loop()
 
             await self.api.close()
-            print("\n--- ModFetch 所有任务完成 ---")
+            await self.safe_print("\n--- ModFetch 所有任务完成 ---")
 
             if self.failed_downloads:
-                print("\n以下文件下载失败：")
+                await self.safe_print("\n以下文件下载失败：")
                 for f in self.failed_downloads:
-                    print(f"  - {f}")
+                    await self.safe_print(f"  - {f}")
             if self.skipped_mods:
-                print("\n以下模组被跳过：")
+                await self.safe_print("\n以下模组被跳过：")
                 for m in self.skipped_mods:
-                    print(f"  - {m}")
+                    await self.safe_print(f"  - {m}")
             if not self.failed_downloads and not self.skipped_mods:
-                print("\n所有模组及其依赖都已成功处理并下载。")
+                await self.safe_print("\n所有模组及其依赖都已成功处理并下载。")
 
         except ModFetchError as e:
-            print(f"\n[致命错误] {e}")
+            await self.safe_print(f"\n[致命错误] {e}")
         except Exception as e:
-            print(f"\n[意外错误] 发生了一个未预期的错误: {e}")
+            await self.safe_print(f"\n[意外错误] 发生了一个未预期的错误: {e}")
         finally:
             # 确保 session 关闭
             if not self.api.session.closed:
