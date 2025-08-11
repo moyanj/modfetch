@@ -426,8 +426,8 @@ class ModFetch:
                 dirx, "zip", os.path.join(self.config["download_dir"], dirx)
             )
             shutil.move(
-                os.path.join(dirx + ".zip"),
-                os.path.join(self.config["download_dir"]),
+                dirx + ".zip",
+                os.path.join(self.config["download_dir"], dirx + ".zip"),
             )
 
     async def start(self):
