@@ -9,6 +9,7 @@ import hashlib
 import asyncio
 import aiofiles
 import shutil
+import traceback
 
 
 class ModFetch:
@@ -201,9 +202,7 @@ class ModFetch:
                         await self.safe_print(
                             f"    - 发现必需依赖: '{dep_slug}' (ID: {dep_project_id})"
                         )
-                        await self.process_mod(
-                            dep_project_id, version
-                        )  # 递归处理依赖项
+                        await self.process_mod(dep_project, version)  # 递归处理依赖项
                     else:
                         await self.safe_print(
                             f"[警告] 无法获取必需依赖 '{dep_project_id}' 的详情。"
@@ -320,7 +319,7 @@ class ModFetch:
         )
 
         for mod_id in self.config.get("mods", []):
-
+            os.makedirs(self.version_download_dir + "/mods", exist_ok=True)
             project_info = await self.api.get_project(mod_id)
             if not project_info:
                 await self.safe_print(f"[跳过] 无法找到模组: '{mod_id}'，跳过。")
@@ -332,6 +331,7 @@ class ModFetch:
             await self.process_mod(project_info, version)
 
         for resourcepack_id in self.config.get("resourcepacks", []):
+            os.makedirs(self.version_download_dir + "/resourcepacks", exist_ok=True)
             project_info = await self.api.get_project(resourcepack_id)
             if not project_info:
                 await self.safe_print(
@@ -342,6 +342,17 @@ class ModFetch:
                 )
                 continue
             await self.process_resourcepacks(project_info, version)
+
+        for shaderpack_id in self.config.get("shaderpacks", []):
+            os.makedirs(self.version_download_dir + "/shaderpacks", exist_ok=True)
+            project_info = await self.api.get_project(shaderpack_id)
+            if not project_info:
+                await self.safe_print(
+                    f"[跳过] 无法找到光影包: '{shaderpack_id}'，跳过。"
+                )
+                self.skipped_mods.append(f"未在 {version} 找到光影包: {shaderpack_id}")
+                continue
+            await self.process_shaderpacks(project_info, version)
 
         await self.process_extra_urls(version)
 
@@ -409,8 +420,14 @@ class ModFetch:
 
     async def compress_mods(self):
         for dirx in os.listdir(self.config["download_dir"]):
+            if not os.path.isdir(os.path.join(self.config["download_dir"], dirx)):
+                continue
             shutil.make_archive(
                 dirx, "zip", os.path.join(self.config["download_dir"], dirx)
+            )
+            shutil.move(
+                os.path.join(dirx + ".zip"),
+                os.path.join(self.config["download_dir"]),
             )
 
     async def start(self):
@@ -449,6 +466,7 @@ class ModFetch:
             await self.safe_print(f"\n[致命错误] {e}")
         except Exception as e:
             await self.safe_print(f"\n[意外错误] 发生了一个未预期的错误: {e}")
+            traceback.print_exc()
         finally:
             # 确保 session 关闭
             if not self.api.session.closed:

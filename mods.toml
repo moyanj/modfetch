@@ -1,5 +1,5 @@
 # Minecraft 版本，例如 "1.20.1"
-mc_version = ["1.20.1", "1.21.7"]
+mc_version = ["1.20.4", "1.21.7", "1.19.2", "1.20.1"]
 
 # 模组加载器，可选值: "fabric", "forge", "quilt"
 mod_loader = "fabric"
@@ -29,4 +29,22 @@ mods = [
     "sodium-extra",
     "sodium",
     "sound-physics-remastered",
+    "i18nupdatemod",
+    "memoryleakfix",
+    "distanthorizons",
+    "controlling",
+    "modernfix",
+    "no-chat-reports",
+    "starlight",
+    "lazydfu",
 ]
+
+resourcepacks = [
+    "even-better-enchants",
+    "faithful-64x",
+    "fast-better-grass",
+    "3d-crops",
+    "new-glowing-ores",
+]
+
+shaderpacks = ["complementary-reimagined", "vanilla-plus-shader"]
