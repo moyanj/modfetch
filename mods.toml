@@ -1,12 +1,10 @@
+[minecraft]
 # Minecraft 版本，例如 "1.20.1"
-mc_version = ["1.20.4", "1.21.7", "1.19.2", "1.20.1"]
+version = ["1.20.4", "1.21.7", "1.19.2", "1.20.1"]
 
 # 模组加载器，可选值: "fabric", "forge", "quilt"
 mod_loader = "fabric"
-# 是否压缩
-compress = true
-# 模组下载目录，程序将在此目录下创建 'mods' 文件夹
-download_dir = "./downloads"
+
 mods = [
     "rei",
     "betterf3",
@@ -49,3 +47,9 @@ resourcepacks = [
 ]
 
 shaderpacks = ["complementary-reimagined", "vanilla-plus-shader"]
+
+[output]
+# 是否压缩
+compress = true
+# 模组下载目录，程序将在此目录下创建 'mods' 文件夹
+download_dir = "./downloads"

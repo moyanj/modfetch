@@ -15,7 +15,8 @@ import traceback
 class ModFetch:
     def __init__(self, config: dict):
         self.api = ModrinthClient()
-        self.config = config
+        self.mc_config = config["minecraft"]
+        self.output_config = config["output"]
         self.download_queue = asyncio.Queue()
         self.processed_mods = set()
         self.failed_downloads = []
@@ -165,7 +166,7 @@ class ModFetch:
         await self.safe_print(f"[*] 正在分析模组: '{mod_slug}' (ID: {mod_id})")
 
         version_info, file_info = await self.api.get_version(
-            mod_id, version, self.config["mod_loader"]
+            mod_id, version, self.mc_config["mod_loader"]
         )
 
         if not version_info or not file_info:
@@ -214,7 +215,7 @@ class ModFetch:
                 # await self.safe_print(f"    - 依赖 '{dep_project_id}' 已处理过，跳过。")
 
     async def process_extra_urls(self, version):
-        for extar_url in self.config.get("extra_urls", []):
+        for extar_url in self.mc_config.get("extra_urls", []):
             if isinstance(extar_url, str):
                 url = extar_url
                 type = "file"
@@ -236,7 +237,7 @@ class ModFetch:
                 print(f"[警告] 忽略无效的额外URL配置: {extar_url}")
                 continue
 
-            url = url.format(mc_version=version, loader=self.config["mod_loader"])
+            url = url.format(mc_version=version, loader=self.mc_config["mod_loader"])
             filename = filename or os.path.basename(url)
 
             download_path = ""
@@ -311,14 +312,15 @@ class ModFetch:
         处理单个版本
         """
         self.version_download_dir = os.path.join(
-            self.config["download_dir"], f"{version}-{self.config['mod_loader']}"
+            self.output_config["download_dir"],
+            f"{version}-{self.mc_config['mod_loader']}",
         )
         os.makedirs(self.version_download_dir, exist_ok=True)
         await self.safe_print(
-            f"\n正在为 Minecraft {version} ({self.config['mod_loader']}) 准备下载目录: {self.version_download_dir}"
+            f"\n正在为 Minecraft {version} ({self.mc_config['mod_loader']}) 准备下载目录: {self.version_download_dir}"
         )
 
-        for mod_id in self.config.get("mods", []):
+        for mod_id in self.mc_config.get("mods", []):
             os.makedirs(self.version_download_dir + "/mods", exist_ok=True)
             project_info = await self.api.get_project(mod_id)
             if not project_info:
@@ -330,7 +332,7 @@ class ModFetch:
 
             await self.process_mod(project_info, version)
 
-        for resourcepack_id in self.config.get("resourcepacks", []):
+        for resourcepack_id in self.mc_config.get("resourcepacks", []):
             os.makedirs(self.version_download_dir + "/resourcepacks", exist_ok=True)
             project_info = await self.api.get_project(resourcepack_id)
             if not project_info:
@@ -343,7 +345,7 @@ class ModFetch:
                 continue
             await self.process_resourcepacks(project_info, version)
 
-        for shaderpack_id in self.config.get("shaderpacks", []):
+        for shaderpack_id in self.mc_config.get("shaderpacks", []):
             os.makedirs(self.version_download_dir + "/shaderpacks", exist_ok=True)
             project_info = await self.api.get_project(shaderpack_id)
             if not project_info:
@@ -389,22 +391,20 @@ class ModFetch:
         """
         检查配置文件
         """
-        if not self.config.get("mc_version"):
-            raise ModFetchError("配置错误：请指定 'mc_version'。")
-        if not self.config.get("mod_loader"):
+        if not self.mc_config.get("version"):
+            raise ModFetchError("配置错误：请指定 'version'。")
+        if not self.mc_config.get("mod_loader"):
             raise ModFetchError("配置错误：请指定 'mod_loader'。")
-        if not self.config.get("download_dir"):
-            raise ModFetchError("配置错误：请指定 'download_dir'。")
-        if not self.config.get("mods"):
+        if not self.mc_config.get("mods"):
             raise ModFetchError("配置错误：请指定 'mods'。")
 
-        if self.config["mod_loader"] not in ["forge", "fabric", "quilt"]:
+        if self.mc_config["mod_loader"] not in ["forge", "fabric", "quilt"]:
             raise ModFetchError(
                 "配置错误：'mod_loader' 只支持 'forge', 'fabric', 'quilt'。"
             )
 
         # 支持两种格式: ["a", "b"] 或 [{"slug": "a"}, {"id": "b"}]
-        for idx, mod in enumerate(self.config["mods"]):
+        for idx, mod in enumerate(self.mc_config["mods"]):
             if isinstance(mod, str):
                 continue  # 字符串格式直接接受
             elif isinstance(mod, dict) and (mod.get("slug") or mod.get("id")):
@@ -419,22 +419,24 @@ class ModFetch:
                 raise ModFetchError(error_msg)
 
     async def compress_mods(self):
-        for dirx in os.listdir(self.config["download_dir"]):
-            if not os.path.isdir(os.path.join(self.config["download_dir"], dirx)):
+        for dirx in os.listdir(self.output_config["download_dir"]):
+            if not os.path.isdir(
+                os.path.join(self.output_config["download_dir"], dirx)
+            ):
                 continue
             shutil.make_archive(
-                dirx, "zip", os.path.join(self.config["download_dir"], dirx)
+                dirx, "zip", os.path.join(self.output_config["download_dir"], dirx)
             )
             shutil.move(
                 dirx + ".zip",
-                os.path.join(self.config["download_dir"], dirx + ".zip"),
+                os.path.join(self.output_config["download_dir"], dirx + ".zip"),
             )
 
     async def start(self):
         try:
             self.validate_config()
             await self.safe_print("--- ModFetch 下载器启动 ---")
-            for version in self.config["mc_version"]:
+            for version in self.mc_config["version"]:
                 await self.safe_print(
                     f"\n正在分析 Minecraft 版本 {version} 的模组及其依赖..."
                 )
@@ -445,7 +447,7 @@ class ModFetch:
             # 统一执行下载
             await self.download_loop()
 
-            if self.config.get("compress"):
+            if self.mc_config.get("compress"):
                 await self.compress_mods()
 
             await self.api.close()
