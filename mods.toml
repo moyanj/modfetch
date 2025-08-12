@@ -11,7 +11,7 @@ mods = [
     "rei",
     "betterf3",
     "journeymap",
-    "imblocker",
+    "imblocker-original",
     "inventory-profiles-next",
     "appleskin",
     "blur-plus",
@@ -42,6 +42,7 @@ mods = [
 resourcepacks = [
     "even-better-enchants",
     "faithful-64x",
+    "faithful-32x",
     "fast-better-grass",
     "3d-crops",
     "new-glowing-ores",
