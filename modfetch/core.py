@@ -29,35 +29,6 @@ def should_include(entry: Union[Dict, str], version: str, features: List[str]) -
     return True
 
 
-async def enqueue_file(
-    fetcher: "ModFetch",
-    url: str,
-    filename: str,
-    category: str,
-    sha1: Optional[str] = None,
-):
-    """
-    将文件加入下载队列，并确保目标路径存在
-    """
-    await fetcher.ensure_directory_exists(category)
-    fetcher.download_queue.put_nowait(
-        (url, filename, fetcher.get_download_path(category), sha1)
-    )
-    await fetcher.log("info", f"文件 '{filename}' 加入 {category} 下载队列。")
-
-
-async def verify_sha1(
-    fetcher: "ModFetch", file_path: str, expected_sha1: Optional[str]
-) -> bool:
-    """
-    校验文件的 SHA1 是否匹配
-    """
-    if not expected_sha1:
-        return True
-    current_sha1 = await fetcher.calc_sha1(file_path)
-    return current_sha1 == expected_sha1
-
-
 class ModFetch:
     def __init__(self, config: dict, features: List[str]):
         self.api = Client()
@@ -80,6 +51,31 @@ class ModFetch:
         """
         path = self.get_download_path(category)
         os.makedirs(path, exist_ok=True)
+
+    async def enqueue_file(
+        self,
+        url: str,
+        filename: str,
+        category: str,
+        sha1: Optional[str] = None,
+    ):
+        """
+        将文件加入下载队列，并确保目标路径存在
+        """
+        await self.ensure_directory_exists(category)
+        self.download_queue.put_nowait(
+            (url, filename, self.get_download_path(category), sha1)
+        )
+        await self.log("info", f"文件 '{filename}' 加入下载队列。")
+
+    async def verify_sha1(self, file_path: str, expected_sha1: Optional[str]) -> bool:
+        """
+        校验文件的 SHA1 是否匹配
+        """
+        if not expected_sha1:
+            return True
+        current_sha1 = await self.calc_sha1(file_path)
+        return current_sha1 == expected_sha1
 
     def get_download_path(self, category: str) -> str:
         """
@@ -155,8 +151,8 @@ class ModFetch:
             await self.copy_file(url[7:], file_path)
             return
 
-        if os.path.exists(file_path) and await verify_sha1(
-            self, file_path, expected_sha1
+        if os.path.exists(file_path) and await self.verify_sha1(
+            file_path, expected_sha1
         ):
             await self.log(
                 "skip", f"文件 '{filename}' 已存在，SHA1 校验成功，跳过下载。"
@@ -198,7 +194,7 @@ class ModFetch:
                         if total_size > 0 and downloaded == total_size:
                             await self.log("progress", f"{filename}: 100.0%")
 
-            if not await verify_sha1(self, file_path, expected_sha1):
+            if not await self.verify_sha1(file_path, expected_sha1):
                 os.remove(file_path)
                 self.failed_downloads.append(filename)
                 await self.log("error", f"{filename} SHA1 校验失败，重新下载。")
@@ -247,7 +243,7 @@ class ModFetch:
         url = file_info["url"]
         sha1 = file_info.get("hashes", {}).get("sha1")
 
-        await enqueue_file(self, url, filename, "mods", sha1)
+        await self.enqueue_file(url, filename, "mods", sha1)
         self.processed_mods.add(mod_id)
 
         await self.process_dependencies(version_info, version)
@@ -297,8 +293,7 @@ class ModFetch:
             self.skipped_mods.append(f"{slug} - {version} 无可用资源")
             return
 
-        await enqueue_file(
-            self,
+        await self.enqueue_file(
             file_info["url"],
             file_info["filename"],
             category,
@@ -326,8 +321,7 @@ class ModFetch:
                 await self.log("warn", f"忽略未知类型: {file_type}")
                 continue
 
-            await enqueue_file(
-                self,
+            await self.enqueue_file(
                 url,
                 filename,
                 file_type.replace("pack", "packs"),
@@ -357,7 +351,7 @@ class ModFetch:
                 if isinstance(idx, dict):
                     idx = idx.get("id") or idx.get("slug")
 
-                project_info = await self.api.get_project(idx)
+                project_info = await self.api.get_project(idx)  # type: ignore
                 if not project_info:
                     await self.log("error", f"{idx} 未找到，跳过。")
                     self.skipped_mods.append(f"{category} {idx} - 找不到项目详情")
@@ -543,12 +537,6 @@ class ModFetch:
         await self.log("success", "所有模组归档完成。")
 
 
-class ModFetchError(Exception):
-    """自定义异常类"""
-
-    pass
-
-
 async def compress_mods(output_path):
     for root, dirs, _ in os.walk(output_path):
         for d in dirs:
@@ -568,12 +556,12 @@ def deep_merge(base: Mapping, merge: Mapping) -> dict:
         base_val = merged.get(key)
 
         if isinstance(base_val, Mapping) and isinstance(merge_val, Mapping):
-            merged[key] = deep_merge(base_val, merge_val)
+            merged[key] = deep_merge(base_val, merge_val)  # type: ignore
 
         elif isinstance(base_val, list) and isinstance(merge_val, list):
             combined = base_val + merge_val
-            merged[key] = list(dict.fromkeys(combined))  # 保留唯一性
+            merged[key] = list(dict.fromkeys(combined))  # type: ignore 保留唯一性
         else:
-            merged[key] = copy.deepcopy(merge_val)
+            merged[key] = copy.deepcopy(merge_val)  # type: ignore
 
-    return merged
+    return merged  # type: ignore
