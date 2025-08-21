@@ -8,7 +8,7 @@ import aiofiles
 from modfetch.core import ModFetch
 
 
-async def main(config_path: str):
+async def main(config_path: str, feature: list[str]):
     if config_path.endswith(".toml"):
         cfg = toml.load(config_path)
     elif config_path.endswith(".json"):
@@ -19,14 +19,19 @@ async def main(config_path: str):
             cfg = yaml.load(await cfg_file.read(), yaml.Loader)
     else:
         raise ValueError("Invalid config file format")
-    modfetch = ModFetch(cfg)
+    modfetch = ModFetch(cfg, feature)
     await modfetch.start()
 
 
 @click.command()
 @click.argument("config", type=click.Path(exists=True), default="mods.toml")
-def cli_main(config):
-    asyncio.run(main(config))
+@click.option("-f", "--feature", help="Feature to enable")
+def cli_main(config, feature=""):
+    if feature:
+        features = feature.split(",")
+    else:
+        features = []
+    asyncio.run(main(config, features))
 
 
 if __name__ == "__main__":
