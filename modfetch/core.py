@@ -5,6 +5,7 @@ import os
 import json
 import toml
 import yaml
+import xmltodict
 import shutil
 from collections.abc import Mapping
 import traceback
@@ -22,10 +23,16 @@ def should_include(entry: Union[Dict, str], version: str, features: List[str]) -
     判断该项目是否应包含在当前构建中，基于 only_version 和 feature
     """
     if isinstance(entry, dict):
-        if (need_ver := entry.get("only_version")) and need_ver != version:
-            return False
-        if (feature := entry.get("feature")) and feature not in features:
-            return False
+        if need_versions := entry.get("only_version"):
+            if isinstance(need_versions, str):
+                need_versions = [need_versions]
+            if not version in need_versions:
+                return False
+        if cfg_features := entry.get("feature"):
+            if isinstance(cfg_features, str):
+                cfg_features = [cfg_features]
+            if all(feature in features for feature in cfg_features):
+                return False
     return True
 
 
@@ -372,6 +379,7 @@ class ModFetch:
             process_id("mods"),
             process_id("resourcepacks"),
             process_id("shaderpacks"),
+            self.process_extra_urls(version),
         )
 
     async def setup_directories(self):
@@ -408,7 +416,7 @@ class ModFetch:
     async def analyze_config(self, config: dict):
         while parent_ref := config.get("from"):
             url = parent_ref.pop("url", None)
-            fmt = parent_ref.pop("format", "json")
+            fmt = parent_ref.pop("format", "toml")
             if not url:
                 await self.safe_print("未提供 from 配置文件地址")
                 break
@@ -439,6 +447,8 @@ class ModFetch:
             return toml.loads(text)
         elif fmt == "yaml":
             return yaml.safe_load(text)
+        elif fmt == "xml":
+            return xmltodict.parse(text)
         else:
             raise ModFetchError(f"未知的配置格式: {fmt}")
 

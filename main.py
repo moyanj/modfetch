@@ -4,6 +4,7 @@ import toml
 import json
 import yaml
 import aiofiles
+import xmltodict
 
 from modfetch.core import ModFetch
 
@@ -14,9 +15,12 @@ async def main(config_path: str, feature: list[str]):
     elif config_path.endswith(".json"):
         async with aiofiles.open(config_path) as cfg_file:
             cfg = json.loads(await cfg_file.read())
-    elif config_path.endswith(".yaml"):
+    elif config_path.endswith(".yaml") or config_path.endswith(".yml"):
         async with aiofiles.open(config_path) as cfg_file:
             cfg = yaml.load(await cfg_file.read(), yaml.Loader)
+    elif config_path.endswith(".xml"):
+        async with aiofiles.open(config_path) as cfg_file:
+            cfg = xmltodict.parse(await cfg_file.read())
     else:
         raise ValueError("Invalid config file format")
     modfetch = ModFetch(cfg, feature)
