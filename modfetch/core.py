@@ -1,19 +1,24 @@
-import json
-from modfetch.api import Client
-import os
-from modfetch.error import ModFetchError
-import aiohttp
-from typing import Optional
-import hashlib
 import asyncio
-import aiofiles
+import copy
+import hashlib
+import json
+import os
 import shutil
 import traceback
+from collections.abc import Mapping, Sequence
+from typing import Optional
+
+import aiofiles
+import aiohttp
+
+from modfetch.api import Client
+from modfetch.error import ModFetchError
 
 
 class ModFetch:
     def __init__(self, config: dict):
         self.api = Client()
+        self.config = config
         self.mc_config = config["minecraft"]
         self.output_config = config["output"]
         self.metadata = config.get("metadata", {})
@@ -432,6 +437,37 @@ class ModFetch:
                 os.path.join(self.output_config["download_dir"], dirx + ".zip"),
             )
 
+    async def analyze_config(self, config: dict):
+        """
+        异步递归处理配置继承（deep_merge）
+        如果 config 有 'from' 项，则加载父配置并合并到当前 config
+        """
+        while "from" in config:
+            parent_url = config["from"].pop(
+                "url", None
+            )  # 一次性读取url并移除防止死循环
+            file_format = config["from"].pop("format", "json")
+            if not parent_url:
+                await self.safe_print("[警告] 'from' 的 url 字段缺失，跳过继承。")
+                break
+            await self.safe_print(
+                f"[继承] 正在加载父配置: {parent_url} (格式: {file_format})"
+            )
+            # 加载父配置（有可能已经是分析后的最终配置）
+            parent_config = await self.api.get_config(parent_url, file_format)
+            if not parent_config:
+                await self.safe_print(
+                    f"[致命错误] 无法加载父配置 '{parent_url}'。整合包无法继续。"
+                )
+                raise ModFetchError(
+                    f"无法加载父配置 '{parent_url}'，可能是网络或格式问题"
+                )
+            # 递归分析父配置（处理其 from 字段）
+            await self.analyze_config(parent_config)
+            # 合并父配置和当前配置，以当前配置为主
+            config = deep_merge(parent_config, config)
+        return config
+
     async def make_mrpack(self, current_version_dir: str, mc_version: str):
         """
         生成整合包
@@ -522,6 +558,11 @@ class ModFetch:
     async def start(self):
         try:
             self.validate_config()
+            self.config = await self.analyze_config(self.config)
+            self.mc_config = self.config["minecraft"]
+            self.output_config = self.config["output"]
+            self.metadata = self.config.get("metadata", {})
+            print(self.config)
             await self.safe_print("--- ModFetch 下载器启动 ---")
             for version in self.mc_config["version"]:
                 await self.safe_print(
@@ -569,3 +610,61 @@ class ModFetch:
             # 确保 session 关闭
             if not self.api.session.closed:
                 await self.api.close()
+
+
+def deep_merge(base: dict, merge: dict) -> dict:
+    """
+    Deep merge 两个字典，列表合并，并可选去重
+
+    参数:
+        base (dict): 默认/旧配置
+        merge (dict): 需要合并的新配置
+        deduplicate_lists (bool): 合并列表时是否去重（默认 True）
+
+    返回:
+        dict: 合并后的完整字典
+    """
+    merged = copy.deepcopy(base)  # 深度复制 base，避免修改原字典
+
+    def merge_values(base_val, merge_val):
+        # 如果 merge_val 是 dict 且 base_val 也是 dict，递归合并
+        if isinstance(base_val, Mapping) and isinstance(merge_val, Mapping):
+            return deep_merge(base_val, merge_val)  # type: ignore
+
+        # 如果 merge_val 是 list 且 base_val 是 list，拼接并去重
+        elif isinstance(base_val, list) and isinstance(merge_val, list):
+            combined = base_val + merge_val
+            # 保留顺序的去重方式（适用于 hashable 类型）
+            seen = set()
+            unique = []
+            for item in combined:
+                if item not in seen:
+                    seen.add(item)
+                    unique.append(item)
+            return unique
+
+        # 其他情况（包括 primitives, 不一致类型）直接用 merge_val 覆盖 base_val
+        else:
+            return merge_val
+
+    for key, merge_val in merge.items():
+        base_val = merged.get(key)
+        if key in merged:
+            # 如果 base_val 是 dict，而 merge_val 是 dict，递归合并
+            # 如果 base_val 是 list，merge_val 是 list，就合并它们
+            if isinstance(base_val, Mapping) and isinstance(merge_val, Mapping):
+                merged[key] = deep_merge(base_val, merge_val)  # type: ignore
+            elif isinstance(base_val, list) and isinstance(merge_val, list):
+                merged[key] = base_val + merge_val
+                seen = set()
+                merged[key] = [
+                    item
+                    for item in merged[key]
+                    if item not in seen and not seen.add(item)
+                ]
+            else:
+                merged[key] = merge_val
+        else:
+            merged[key] = copy.deepcopy(merge_val)
+
+    return merged

@@ -1,10 +1,9 @@
-- [ ] 配置文件继承
+- [x] 配置文件继承
 - [ ] feature支持
 - [ ] 并发分析依赖关系
 - [x] 配置文件支持
 - [ ] CurseForge支持
 - [x] mrpack格式生成支持
-- [ ] CurseForge格式生成支持
 - [x] 生成zip压缩文件
 - [x] 递归依赖解析
 - [x] Modrinth 支持

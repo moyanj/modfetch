@@ -1,7 +1,18 @@
+import json
 from typing import Optional
+
+import aiofiles
 import aiohttp
+import toml
 
 from modfetch.error import ModrinthError
+
+try:
+    import yaml
+
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
 
 
 class Client:
@@ -98,3 +109,19 @@ class Client:
         )
         if versions:
             return versions[-1]["version"]
+
+    async def get_config(self, url: str, format: str):
+        if url.startswith("file://"):
+            async with aiofiles.open(url[7:], "r") as f:
+                text = await f.read()
+        else:
+            async with self.session.get(url) as response:
+                text = await response.text()
+        if format == "json":
+            return json.loads(text)
+        elif format == "yaml":
+            if not HAS_YAML:
+                raise ValueError("请安装 pyyaml")
+            return yaml.safe_load(text)  # type: ignore
+        elif format == "toml":
+            return toml.loads(text)
