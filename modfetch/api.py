@@ -4,8 +4,8 @@ import aiohttp
 from modfetch.error import ModrinthError
 
 
-class ModrinthClient:
-    BASE_URL = "https://api.modrinth.com/v2"
+class Client:
+    MODRINTH_BASE_URL = "https://api.modrinth.com/v2"
 
     def __init__(self):
         self.session = aiohttp.ClientSession()
@@ -14,9 +14,7 @@ class ModrinthClient:
     async def _request(
         self, endpoint: str, params: Optional[dict] = None
     ) -> dict | None:
-        async with self.session.get(
-            self.BASE_URL + endpoint, params=params
-        ) as response:
+        async with self.session.get(endpoint, params=params) as response:
             if response.status == 200:
                 return await response.json()
             elif response.status == 404:
@@ -32,7 +30,7 @@ class ModrinthClient:
     async def get_project(self, idx: str):
         """通过slug或id获取模组项目详情。"""
         # _request 已经处理了404，所以这里可以直接返回其结果
-        return await self._request(f"/project/{idx}")
+        return await self._request(f"{self.MODRINTH_BASE_URL}/project/{idx}")
 
     async def get_version(
         self,
@@ -49,7 +47,9 @@ class ModrinthClient:
         params = {"game_versions": f'["{mc_version}"]'}
         if mod_loader:
             params["loaders"] = f'["{mod_loader}"]'
-        versions = await self._request(f"/project/{idx}/version", params)
+        versions = await self._request(
+            f"{self.MODRINTH_BASE_URL}/project/{idx}/version", params
+        )
 
         if not versions:
             # 如果没有找到版本，_request会返回None，或者get_project返回None时，这里就无版本列表
@@ -74,3 +74,27 @@ class ModrinthClient:
     async def close(self):
         if not self.session.closed:
             await self.session.close()
+
+    async def get_fabric_version(self, mc_version: str):
+        """获取指定Minecraft版本下的Fabric版本。"""
+        versions = await self._request(
+            f"https://bmclapi2.bangbang93.com/fabric-meta/v2/versions/loader/{mc_version}",
+        )
+        if versions:
+            return versions[0]["loader"]["version"]
+
+    async def get_quilt_version(self, mc_version: str):
+        """获取指定Minecraft版本下的Quilt版本。"""
+        versions = await self._request(
+            f"https://meta.quiltmc.org/v3/versions/loader/{mc_version}",
+        )
+        if versions:
+            return versions[0]["loader"]["version"]
+
+    async def get_forge_version(self, mc_version: str):
+        """获取指定Minecraft版本下的Forge版本。"""
+        versions = await self._request(
+            f"https://bmclapi2.bangbang93.com/forge/minecraft/{mc_version}",
+        )
+        if versions:
+            return versions[-1]["version"]
