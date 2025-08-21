@@ -53,6 +53,29 @@ class ModFetch:
         except FileNotFoundError:
             return None  # 文件不存在时返回None，避免在验证时报错
 
+    async def copy_file(self, src_path: str, dest_path: str):
+        """
+        复制单个文件 (支持并发)
+        """
+        await self.safe_print(f"[复制] 文件 '{os.path.basename(src_path)}' 开始复制。")
+        if os.path.isdir(src_path):
+            shutil.copytree(src_path, dest_path)
+            await self.safe_print(
+                f"[复制] 文件 '{os.path.basename(src_path)}' 复制完成。"
+            )
+            return
+        elif os.path.isfile(src_path):
+            await self.safe_print(
+                f"[复制] 文件 '{os.path.basename(src_path)}' 开始复制。"
+            )
+            shutil.copy2(src_path, dest_path)
+            await self.safe_print(
+                f"[复制] 文件 '{os.path.basename(src_path)}' 复制完成。"
+            )
+            return
+        else:
+            raise ModFetchError()
+
     async def download_file(
         self,
         url: str,
@@ -64,6 +87,14 @@ class ModFetch:
         下载单个文件 (支持并发)
         """
         file_path = os.path.join(download_dir, filename)
+
+        if url.startswith("file://"):
+            # 本地文件，直接复制
+            src_path = url[7:]
+            if not os.path.exists(src_path):
+                raise ModFetchError(f"文件 '{filename}' 不存在。")
+            await self.copy_file(src_path, file_path)
+            return
 
         if os.path.exists(file_path):
             current_sha1 = await self.calc_sha1(file_path)
