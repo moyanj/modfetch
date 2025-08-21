@@ -414,19 +414,27 @@ class ModFetch:
             raise ModFetchError("请配置至少一个 mod 列表")
 
     async def analyze_config(self, config: dict):
-        while parent_ref := config.get("from"):
-            url = parent_ref.pop("url", None)
-            fmt = parent_ref.pop("format", "toml")
-            if not url:
-                await self.safe_print("未提供 from 配置文件地址")
-                break
+        # 处理 from 字段，支持从单个或多个文件加载配置
+        parent_refs = config.get("from")
+        if parent_refs:
+            # 如果 from 是一个字典（单个配置），转换为列表
+            if isinstance(parent_refs, dict):
+                parent_refs = [parent_refs]
+            
+            # 处理所有父配置
+            for parent_ref in parent_refs:
+                url = parent_ref.get("url")
+                fmt = parent_ref.get("format", "toml")
+                if not url:
+                    await self.safe_print("未提供 from 配置文件地址")
+                    continue
 
-            text = await self.handle_url_content(url)
-            await self.log("info", f"加载到父配置 {url}")
-            parent_config = await self.parse_config(text, fmt)
+                text = await self.handle_url_content(url)
+                await self.log("info", f"加载到父配置 {url}")
+                parent_config = await self.parse_config(text, fmt)
 
-            await self.analyze_config(parent_config)
-            config = deep_merge(parent_config, config)
+                await self.analyze_config(parent_config)
+                config = deep_merge(parent_config, config)
 
         self.config = config
         self.mc_config = config["minecraft"]

@@ -10,7 +10,7 @@ ModFetch 旨在提供灵活的配置支持，支持`toml`,`yaml`,`json`,`xml`。
 
 | **配置节**    | **描述**                                                     |
 | ------------- | ------------------------------------------------------------ |
-| `[from]`      | 用于指定远程或本地的父配置文件并继承其内容                   |
+| `[from]`      | 用于指定远程或本地的父配置文件并继承其内容 |
 | `[metadata]`  | 包含整合包的元数据，用于 `.mrpack` 自描述格式                |
 | `[minecraft]` | Minecraft 相关设置（版本、模组加载器、资源、模组等下载配置） |
 | `[output]`    | 指定最终输出路径及后处理方式                                 |
@@ -21,7 +21,7 @@ ModFetch 旨在提供灵活的配置支持，支持`toml`,`yaml`,`json`,`xml`。
 
 ### 1. `from` —— 配置源继承
 
-允许从本地路径或远程 URL 加载并继承其他配置文件。
+允许从本地路径或远程 URL 加载并继承其他配置文件。支持指定多个配置源。
 
 #### **字段说明**
 
@@ -29,10 +29,23 @@ ModFetch 旨在提供灵活的配置支持，支持`toml`,`yaml`,`json`,`xml`。
 - `format`：文件格式，默认为 `toml`，支持 `json`, `yaml`, `toml`，`xml`
 
 #### **示例**
-```toml
+
+```
+# 单个配置源
 [from]
 url = "file://./base.toml"
 format = "toml"
+```
+
+```toml
+# 多个配置源
+[from]
+[[from]]
+url = "file://./base.toml"
+format = "toml"
+[[from]]
+url = "https://example.com/shared-config.toml"
+format = "yaml"
 ```
 
 ---
@@ -76,8 +89,8 @@ authors = ["John Doe", "Jane Smith"]
 
 详细字段说明：
 
-| 字段           | 类型                    | 描述                                                        |
-| -------------- | ----------------------- | ----------------------------------------------------------- |
+| 字段           | 类型                    | 描述                                                  |
+| -------------- | ----------------------- | ----------------------------------------------------- |
 | `id`, `slug`   | string                  | 模组唯一标识，优先使用 Modrinth 的项目 ID 或 slug           |
 | `only_version` | Array<String> 或 string （可选）| 当 Minecraft 版本匹配时才下载      |
 | `feature`      | Array<String> 或 string （可选） | 用于运行时特征标记（如 performance、shader） |
@@ -96,6 +109,7 @@ authors = ["John Doe", "Jane Smith"]
 | `feature`      | Array<String> （可选） | 运行时特征筛选                          |
 
 #### **示例**
+
 ```toml
 [minecraft]
 version = ["1.21.1", "1.21.7"]
