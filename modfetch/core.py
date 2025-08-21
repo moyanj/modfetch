@@ -442,63 +442,91 @@ class ModFetch:
         else:
             raise ModFetchError(f"未知的配置格式: {fmt}")
 
-    async def make_mrpack(self, dir_path: str, mc_version: str):
-        await self.log("info", f"生成 MrPack 创建整合包 for {mc_version}")
-        mod_loader = self.mc_config["mod_loader"]
+    async def make_mrpack(self, current_version_dir: str, mc_version: str):
+        """
+        生成整合包
+        :param current_version_dir: 当前版本下载的根目录 (e.g., download/1.20.1-fabric)
+        :param mc_version: Minecraft 版本
+        """
+        await self.safe_print(f"\n开始为 Minecraft {mc_version} 生成MrPack整合包...")
+        pack_name = self.metadata.get("name", f"ModFetch Pack {mc_version}")
+        pack_version = self.metadata.get("version", "1.0.0")
+        pack_desc = self.metadata.get("description", "")
+        mod_loader_id = self.mc_config["mod_loader"].lower()
+
+        loader_version = "unknown"
         try:
-            if mod_loader == "fabric":
+            if mod_loader_id == "fabric":
                 loader_version = await self.api.get_fabric_version(mc_version)
-            elif mod_loader == "quilt":
+            elif mod_loader_id == "quilt":
                 loader_version = await self.api.get_quilt_version(mc_version)
-            elif mod_loader == "forge":
+            elif mod_loader_id == "forge":
                 loader_version = await self.api.get_forge_version(mc_version)
-            else:
-                loader_version = None
         except Exception as e:
-            await self.log("warn", f"无法获取加载器版本: {e}")
-            loader_version = "unknown"
+            await self.safe_print(
+                f"[警告] 无法获取 Mod 加载器版本信息: {e}. 将使用通用名称。"
+            )
 
         manifest = {
             "game": "minecraft",
             "formatVersion": 1,
-            "versionId": self.metadata.get("version", "1.0.0"),
-            "name": self.metadata.get(
-                "name", f"MyPack {self.mc_config.get('version')}"
-            ),
-            "summary": self.metadata.get("description", ""),
+            "versionId": pack_version,
+            "name": pack_name,
+            "summary": pack_desc,
+            "files": [],
             "dependencies": {
                 "minecraft": mc_version,
-                f"{mod_loader}-loader": loader_version,
+                f"{mod_loader_id}-loader": loader_version,
             },
-            "files": [],
         }
 
-        await self.build_mrpack_dir(os.path.join(dir_path, "overrides"), manifest)
+        temp_pack_dir = os.path.join(
+            self.output_config["download_dir"],
+            f"ModPack_Temp_{mc_version}-{mod_loader_id}",
+        )
+        # Clean up any previous temp dir
+        if os.path.exists(temp_pack_dir):
+            shutil.rmtree(temp_pack_dir)
+        os.makedirs(temp_pack_dir, exist_ok=True)
 
-    async def build_mrpack_dir(self, overrides_path: str, manifest: dict):
-        os.makedirs(overrides_path, exist_ok=True)
-        for root, _, files in os.walk(os.path.dirname(overrides_path)):
-            relative = os.path.relpath(root, os.path.dirname(overrides_path))
-            for file in files:
-                shutil.copy2(
-                    os.path.join(root, file),
-                    os.path.join(overrides_path, os.path.basename(relative)),
-                )
-        await self.build_mrpack_final(overrides_path, manifest)
+        overrides_dir = os.path.join(temp_pack_dir, "overrides")
+        os.makedirs(overrides_dir, exist_ok=True)
 
-    async def build_mrpack_final(self, overrides_path: str, manifest: dict):
-        manifest_path = os.path.join(overrides_path, "modrinth.index.json")
+        # Write manifest.json
+        manifest_path = os.path.join(temp_pack_dir, "modrinth.index.json")
         async with aiofiles.open(manifest_path, "w", encoding="utf-8") as f:
             await f.write(json.dumps(manifest, indent=4))
+        await self.safe_print(f"  - modrinth.index.json 已生成。")
 
-        zip_file = os.path.join(
+        # Copy downloaded files to the overrides directory
+        await self.safe_print(f"  - 正在将下载的文件复制到 overrides 文件夹...")
+        for root, dirs, files in os.walk(current_version_dir):
+            relative_path = os.path.relpath(root, current_version_dir)
+            destination_dir = os.path.join(overrides_dir, relative_path)
+            os.makedirs(destination_dir, exist_ok=True)
+            for file in files:
+                shutil.copy2(os.path.join(root, file), destination_dir)
+        await self.safe_print(f"  - 文件复制完成。")
+
+        # Create the zip archive
+        zip_output_filename = os.path.join(
             self.output_config["download_dir"],
-            f"{manifest['name']}-{manifest['versionId']}-MC{manifest['dependencies']['minecraft']}",
+            f"{pack_name}_{pack_version}_MC{mc_version}-{mod_loader_id}",
         )
-        shutil.make_archive(zip_file, "zip", overrides_path)
-        os.rename(zip_file + ".zip", zip_file + ".mrpack")
-        shutil.rmtree(os.path.dirname(overrides_path))
-        await self.log("success", f"MrPack 文件生成成功: {zip_file}.mrpack")
+        shutil.make_archive(zip_output_filename, "zip", temp_pack_dir)
+        shutil.move(
+            zip_output_filename + ".zip",
+            os.path.join(zip_output_filename + ".mrpack"),
+        )
+        await self.safe_print(
+            f"[完成] 标准整合包 '{os.path.basename(zip_output_filename)}.mrpack' 已创建。"
+        )
+
+        # Clean up the temporary directory
+        shutil.rmtree(temp_pack_dir)
+        await self.safe_print(
+            f"  - 临时目录 '{os.path.basename(temp_pack_dir)}' 已清理。"
+        )
 
     async def start(self):
         await self.safe_print("开始 ModFetch 下载任务...")
@@ -520,7 +548,13 @@ class ModFetch:
 
     async def build_mrpack_dirs(self):
         tasks = [
-            self.make_mrpack(os.path.join(self.version_download_dir, v), v)
+            self.make_mrpack(
+                os.path.join(
+                    self.output_config["download_dir"],
+                    f"{v}-{self.mc_config["mod_loader"]}",
+                ),
+                v,
+            )
             for v in self.mc_config["version"]
         ]
         await asyncio.gather(*tasks)
