@@ -11,3 +11,5 @@ wheels/
 
 uv.lock
 downloads/
+
+__main__*
