@@ -22,9 +22,7 @@ class Client:
         self.session = aiohttp.ClientSession()
         # self.project_id_to_slug_cache = {} # 这个缓存目前未使用，可以暂时移除
 
-    async def _request(
-        self, endpoint: str, params: Optional[dict] = None
-    ) -> dict | None:
+    async def _request(self, endpoint: str, params: Optional[dict] = None):
         async with self.session.get(endpoint, params=params) as response:
             if response.status == 200:
                 return await response.json()
@@ -49,7 +47,7 @@ class Client:
         mc_version: str,
         mod_loader: Optional[str] = None,
         specific_version: Optional[str] = None,
-    ) -> tuple[dict | None, dict | None]:
+    ):
         """
         获取与指定Minecraft版本/模组加载器兼容的模组版本。
         如果指定 specific_version，则尝试查找该精确版本。
