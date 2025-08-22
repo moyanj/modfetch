@@ -1,1 +1,1 @@
-nuitka --onefile --enable-console --windows-icon-from-ico="logo/logo.ico" --linux-icon="logo/logo_raw.png" --company-name="MoYan"  --product-name="ModFetch" --enable-plugins="upx"  modfetch/__main__.py
+nuitka --onefile --enable-console --windows-icon-from-ico="logo/logo.ico" --linux-icon="logo/logo_raw.png" --company-name="MoYan"  --product-name="ModFetch" --enable-plugins="upx" --output-filename="modfetch"  modfetch/__main__.py
