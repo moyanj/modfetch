@@ -1,33 +1,33 @@
 # modfetch-ui
 
-This template should help get you started developing with Vue 3 in Vite.
+[![License: MIT](https://img.shields.io/github/license/yourname/modfetch-ui)](https://github.com/yourname/modfetch-ui)
 
-## Recommended IDE Setup
+ModFetch 的图形化配置生成工具，提供直观的界面来创建和管理 Minecraft 整合包配置。
 
-[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+## 🧩 功能特性
+- 可视化配置编辑器
+- 实时 TOML 预览
+- 支持所有 ModFetch 配置选项
+- 拖拽式模组管理
+- 配置继承可视化
+- 多语言支持（中文/英文）
 
-## Type Support for `.vue` Imports in TS
+## 🛠️ 开发指南
+请参考 [Vite + Vue 3 开发文档](https://vite.dev/guide/) 进行环境搭建。
 
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
-
-```sh
-pnpm install
+## 📦 项目结构
+```
+modfetch-ui
+├── README.md
+├── index.html
+├── vite.config.js
+└── src/
+    ├── main.js
+    └── App.vue      # 主界面组件
 ```
 
-### Compile and Hot-Reload for Development
+## 🤝 贡献指南
+欢迎提交 PR 和报告 issue。请遵循 [CONTRIBUTING.md] 指南。
 
-```sh
-pnpm dev
-```
-
-### Type-Check, Compile and Minify for Production
-
-```sh
-pnpm build
-```
+## 📄 许可证
+MIT License - [LICENSE](LICENSE) 文件
