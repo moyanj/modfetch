@@ -27,38 +27,42 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # 假设您的 build.sh 脚本需要依赖才能运行，您可以在这里安装
-      # 例如：
-      # - name: Install dependencies (if any)
-      #   run: |
-      #     python -m pip install --upgrade pip
-      #     pip install aiohttp aiofiles toml pyyaml xmltodict
-      #   shell: bash # 在 Windows 上也使用 bash shell 运行以确保兼容性，或者使用 cmd/powershell
+      - name: Install uv and Nuitka with project dependencies # 步骤3: 安装 uv，Nuitka 和项目依赖
+        run: |
+          pip install uv
+          # 创建虚拟环境
+          uv venv
+          uv sync --dev
+        shell: bash
 
-      - name: Make build.sh executable (Linux only) # 步骤3: 赋予 build.sh 脚本执行权限 (仅限Linux)
+      - name: Make build.sh executable (Linux only) # 步骤4: 赋予 build.sh 脚本执行权限 (仅限Linux)
         if: matrix.os == 'ubuntu-latest'
         run: chmod +x ./build.sh
         shell: bash
 
-      - name: Run build script # 步骤4: 运行您的构建脚本
+      - name: Run build script with uv # 步骤5: 运行 Nuitka 构建
+        # 使用 uv run 来确保脚本在虚拟环境中运行，Nuitka 和所有依赖都可用。
         run: ./build.sh
         shell: bash
 
-      - name: Archive modfetch directory # 步骤5: 打包 modfetch 目录 (用于上传)
-        # 在 Linux 上使用 tar，在 Windows 上使用 zip
+      - name: Rename and archive built executable # 步骤6: 重命名并打包可执行文件
         run: |
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            tar -czf modfetch.tar.gz modfetch.exe
+            # Nuitka 在 Linux 上生成名为 'modfetch' 的可执行文件
+            mv modfetch.bin modfetch-linux
+            tar -czf modfetch-linux.tar.gz modfetch-linux
           else
-            7z a modfetch.zip modfetch.bin
+            # Nuitka 在 Windows 上生成名为 'modfetch.exe' 的可执行文件
+            mv modfetch.exe modfetch-windows.exe
+            7z a modfetch-windows.zip modfetch-windows.exe
           fi
-        shell: bash # 在 Windows 上也使用 bash 来确保 tar/7z 命令的执行环境
+        shell: bash
 
-      - name: Upload modfetch artifact # 步骤6: 上传打包好的 modfetch 文件
+      - name: Upload modfetch artifact # 步骤7: 上传打包好的可执行文件
         uses: actions/upload-artifact@v4
         with:
-          name: modfetch-build-${{ matrix.os }}
+          name: modfetch-build-output-${{ matrix.os }} # 更改名称以反映是构建输出
           path: |
-            modfetch.tar.gz
-            modfetch.zip
+            modfetch-linux.tar.gz
+            modfetch-windows.zip
           retention-days: 7 # 构建产物保留7天
