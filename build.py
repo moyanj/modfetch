@@ -14,8 +14,6 @@ def build_with_nuitka():
         "nuitka",
         "--onefile",
         "--enable-console",
-        "--company-name=MoYan",  # 注意这里我将等号也包含在参数中
-        "--product-name=ModFetch",
         "--enable-plugins=upx",
         "--output-filename=modfetch",
         "--windows-icon-from-ico=logo/logo.ico",
