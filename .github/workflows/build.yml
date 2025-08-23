@@ -42,7 +42,7 @@ jobs:
 
       - name: Run build script with uv # 步骤5: 运行 Nuitka 构建
         # 使用 uv run 来确保脚本在虚拟环境中运行，Nuitka 和所有依赖都可用。
-        run: ./build.sh
+        run: uv run build.py
         shell: bash
 
       - name: Rename and archive built executable # 步骤6: 重命名并打包可执行文件
