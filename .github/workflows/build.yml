@@ -48,7 +48,7 @@ jobs:
             tar -czf modfetch-linux.tar.gz modfetch-linux
           else
             # Nuitka 在 Windows 上生成名为 'modfetch.exe' 的可执行文件
-            mv modfetch.exe modfetch-windows.exe
+            mv modfetch.bin modfetch-windows.exe
             7z a modfetch-windows.zip modfetch-windows.exe
           fi
         shell: bash

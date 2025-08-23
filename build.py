@@ -15,7 +15,7 @@ def build_with_nuitka():
         "--onefile",
         "--enable-console",
         "--enable-plugins=upx",
-        "--output-filename=modfetch",
+        "--output-filename=modfetch.bin",
         "--windows-icon-from-ico=logo/logo.ico",
         "--linux-icon=logo/logo_raw.png",
         "modfetch/__main__.py",
