@@ -35,11 +35,6 @@ jobs:
           uv sync --dev
         shell: bash
 
-      - name: Make build.sh executable (Linux only) # 步骤4: 赋予 build.sh 脚本执行权限 (仅限Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: chmod +x ./build.sh
-        shell: bash
-
       - name: Run build script with uv # 步骤5: 运行 Nuitka 构建
         # 使用 uv run 来确保脚本在虚拟环境中运行，Nuitka 和所有依赖都可用。
         run: uv run build.py
