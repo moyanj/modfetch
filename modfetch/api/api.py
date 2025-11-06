@@ -39,7 +39,11 @@ class Client:
     async def get_project(self, idx: str):
         """通过slug或id获取模组项目详情。"""
         # _request 已经处理了404，所以这里可以直接返回其结果
-        return await self._request(f"{self.MODRINTH_BASE_URL}/project/{idx}")
+        a = await self._request(f"{self.MODRINTH_BASE_URL}/project/{idx}")
+        if a["project_type"] == "mod":
+            print(json.dumps(a))
+            pass
+        return a
 
     async def get_version(
         self,
