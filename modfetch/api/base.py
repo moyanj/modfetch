@@ -1,14 +1,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Awaitable, Optional
-
-
-class ModLoader(Enum):
-    FABRIC = "fabric"
-    FORGE = "forge"
-    QUILT = "quilt"
-    NEOFORGE = "neoforge"
+from typing import Optional
+from modfetch.config import ModLoader
 
 
 class ProjectType(Enum):
