@@ -146,6 +146,14 @@ class MetadataConfig:
 
 
 @dataclass
+class PluginConfig:
+    """插件配置"""
+
+    enabled: List[str] = field(default_factory=list)
+    configs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass
 class ModFetchConfig:
     """ModFetch 主配置类"""
 
@@ -162,6 +170,7 @@ class ModFetchConfig:
     retry_delay: float = 1.0  # 初始重试延迟（秒）
     features: List[str] = field(default_factory=list)
     parent_configs: List[ParentConfig] = field(default_factory=list)
+    plugins: PluginConfig = field(default_factory=PluginConfig)
 
     # 原始配置字典（用于向后兼容）
     _raw_config: Dict[str, Any] = field(default_factory=dict, repr=False)
@@ -333,6 +342,13 @@ class ModFetchConfig:
             description=metadata_dict.get("description", ""),
         )
 
+        # 处理插件配置
+        plugins_dict = config_dict.get("plugins", {})
+        plugin_config = PluginConfig(
+            enabled=plugins_dict.get("enabled", []),
+            configs=plugins_dict.get("configs", {}),
+        )
+
         return cls(
             minecraft=minecraft_config,
             output=output_config,
@@ -342,6 +358,7 @@ class ModFetchConfig:
             retry_delay=config_dict.get("retry_delay", 1.0),
             features=config_dict.get("features", []),
             parent_configs=parent_configs,
+            plugins=plugin_config,
             _raw_config=raw_config,
         )
 
@@ -432,6 +449,10 @@ class ModFetchConfig:
                 if self.parent_configs
                 else None
             ),
+            "plugins": {
+                "enabled": self.plugins.enabled,
+                "configs": self.plugins.configs,
+            },
         }
 
     @staticmethod

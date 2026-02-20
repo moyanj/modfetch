@@ -1,0 +1,26 @@
+# ModFetch 配置文件示例 - 使用插件
+
+[minecraft]
+version = ["1.21.1"]
+mod_loader = "fabric"
+mods = [
+    "sodium",
+    "modmenu",
+]
+
+[output]
+download_dir = "./downloads"
+format = ["mrpack"]
+mrpack_modes = ["download"]
+
+[metadata]
+name = "MyModpack"
+version = "1.0.0"
+description = "A modpack with plugins"
+
+# 插件配置
+[plugins]
+enabled = ["progress", "notify"]
+
+[plugins.config.filter]
+blacklist = ["badmod", "anotherbadmod"]

@@ -6,7 +6,7 @@
 
 import os
 import shutil
-from typing import List, Set
+from typing import List, Optional, Set
 
 from loguru import logger
 
@@ -26,12 +26,15 @@ from modfetch.services import (
 from modfetch.download import DownloadManager
 from modfetch.packager import MrpackBuilder, ZipBuilder
 from modfetch.exceptions import ConfigError, DownloadError
+from modfetch.plugins import PluginManager, HookType, HookContext
 
 
 class ModFetchOrchestrator:
     """ModFetch 主协调器"""
 
-    def __init__(self, config: ModFetchConfig):
+    def __init__(
+        self, config: ModFetchConfig, plugin_manager: Optional[PluginManager] = None
+    ):
         self.config = config
         self.client = ModrinthClient()
         self.resolver = ModResolver(self.client)
@@ -40,6 +43,7 @@ class ModFetchOrchestrator:
         self.download_manager: DownloadManager
         self.mrpack_builder = MrpackBuilder()
         self.zip_builder = ZipBuilder()
+        self.plugin_manager = plugin_manager or PluginManager()
 
         self._processed_mods: Set[str] = set()
         self._skipped_mods: List[str] = []
@@ -54,7 +58,13 @@ class ModFetchOrchestrator:
         logger.info("开始 ModFetch 下载任务...")
 
         try:
+            # Hook: 配置加载完成
+            await self._execute_hook(HookType.CONFIG_LOADED)
+
             self._validate_config()
+
+            # Hook: 配置验证完成
+            await self._execute_hook(HookType.CONFIG_VALIDATED)
 
             # 处理每个 Minecraft 版本
             for version in self.config.minecraft.version:
@@ -71,6 +81,19 @@ class ModFetchOrchestrator:
             raise
         finally:
             await self.client.close()
+
+    async def _execute_hook(self, hook_type: HookType, **kwargs) -> None:
+        """执行指定类型的 Hook"""
+        from modfetch.plugins import HookContext
+
+        context = HookContext(
+            config=self.config,
+            version=kwargs.get("version"),
+            mod_entry=kwargs.get("mod_entry"),
+            download_info=kwargs.get("download_info"),
+            extra_data=kwargs.get("extra_data", {}),
+        )
+        await self.plugin_manager.execute_hook(hook_type, context)
 
     def _validate_config(self):
         """验证配置"""
@@ -139,6 +162,14 @@ class ModFetchOrchestrator:
                 logger.debug(f"模组 {mod} 被过滤，不适用于当前版本或功能")
                 continue
 
+            # Hook: 解析模组前
+            from modfetch.models import ModEntry
+
+            mod_entry = mod if isinstance(mod, ModEntry) else None
+            await self._execute_hook(
+                HookType.PRE_RESOLVE, version=version, mod_entry=mod_entry
+            )
+
             # 解析模组
             result = await self.resolver.resolve(
                 mod, version, self.config.minecraft.mod_loader.value
@@ -150,6 +181,18 @@ class ModFetchOrchestrator:
                 continue
 
             project_info, version_info, file_info = result
+
+            # Hook: 解析模组后
+            await self._execute_hook(
+                HookType.POST_RESOLVE,
+                version=version,
+                mod_entry=mod_entry,
+                extra_data={
+                    "project_info": project_info,
+                    "version_info": version_info,
+                    "file_info": file_info,
+                },
+            )
 
             if project_info.id in self._processed_mods:
                 logger.debug(f"模组 {project_info.name} 已处理，跳过")
@@ -193,12 +236,26 @@ class ModFetchOrchestrator:
 
     async def _process_dependencies(self, version_info, version: str, version_dir: str):
         """处理依赖"""
+        # Hook: 解析依赖前
+        await self._execute_hook(
+            HookType.PRE_RESOLVE_DEPENDENCIES,
+            version=version,
+            extra_data={"version_info": version_info},
+        )
+
         deps = await self.dep_resolver.resolve(
             version_info, version, self.config.minecraft.mod_loader.value
         )
 
         if deps:
             logger.info(f"发现 {len(deps)} 个依赖需要处理")
+
+        # Hook: 解析依赖后
+        await self._execute_hook(
+            HookType.POST_RESOLVE_DEPENDENCIES,
+            version=version,
+            extra_data={"dependencies": deps},
+        )
 
         for dep_info, dep_version, dep_file in deps:
             if dep_info.id in self._processed_mods:
@@ -367,6 +424,9 @@ class ModFetchOrchestrator:
 
     async def _generate_mrpack_for_version(self, version: str):
         """为特定版本生成 mrpack 文件"""
+        # Hook: 打包前
+        await self._execute_hook(HookType.PRE_PACKAGE, version=version)
+
         metadata = {
             "name": self.config.metadata.name,
             "version": self.config.metadata.version,
@@ -396,13 +456,14 @@ class ModFetchOrchestrator:
             output_name = f"{metadata['name']}_{metadata['version']}_MC{version}-{self.config.minecraft.mod_loader.value}{suffix}"
             output_path = os.path.join(self.config.output.download_dir, output_name)
 
+            # 在 REFERENCE 模式下，source_dir 内容不应进入 overrides，但临时目录结构仍需正确
+            actual_source = (
+                source_dir
+                if mode == MrpackMode.DOWNLOAD
+                else os.path.join(source_dir, "non_existent_empty_dir")
+            )
+
             try:
-                # 在 REFERENCE 模式下，source_dir 内容不应进入 overrides，但临时目录结构仍需正确
-                actual_source = (
-                    source_dir
-                    if mode == MrpackMode.DOWNLOAD
-                    else os.path.join(source_dir, "non_existent_empty_dir")
-                )
                 if mode == MrpackMode.REFERENCE:
                     os.makedirs(actual_source, exist_ok=True)
 
@@ -416,6 +477,13 @@ class ModFetchOrchestrator:
                     files=self._mrpack_files if mode == MrpackMode.REFERENCE else None,
                 )
                 logger.success(f"mrpack ({mode.value}) 生成成功: {mrpack_path}")
+
+                # Hook: 打包后
+                await self._execute_hook(
+                    HookType.POST_PACKAGE,
+                    version=version,
+                    extra_data={"output_path": mrpack_path, "format": "mrpack"},
+                )
             except Exception as e:
                 logger.error(f"mrpack ({mode.value}) 生成失败: {e}")
             finally:
@@ -446,6 +514,13 @@ class ModFetchOrchestrator:
                 archive_name=f"archive-{version}-{self.config.minecraft.mod_loader.value}",
             )
             logger.success(f"ZIP 生成成功: {zip_path}")
+
+            # Hook: 打包后
+            await self._execute_hook(
+                HookType.POST_PACKAGE,
+                version=version,
+                extra_data={"output_path": zip_path, "format": "zip"},
+            )
         except Exception as e:
             logger.error(f"ZIP 生成失败: {e}")
 

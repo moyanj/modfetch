@@ -15,6 +15,7 @@ from modfetch.models.config import (
     MinecraftConfig,
     OutputConfig,
     MetadataConfig,
+    PluginConfig,
     ModFetchConfig,
     MrpackMode,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "MinecraftConfig",
     "OutputConfig",
     "MetadataConfig",
+    "PluginConfig",
     "ModFetchConfig",
     "MrpackMode",
     # API 模型
