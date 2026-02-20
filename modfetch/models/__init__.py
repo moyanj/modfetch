@@ -1,10 +1,9 @@
 """
-配置模块
+ModFetch 数据模型包
 
-从 models 导入配置类，提供向后兼容的导入路径。
+包含配置模型和 API 模型定义。
 """
 
-# 从 models 重新导出所有配置类
 from modfetch.models.config import (
     ModLoader,
     OutputFormat,
@@ -18,8 +17,16 @@ from modfetch.models.config import (
     MetadataConfig,
     ModFetchConfig,
 )
+from modfetch.models.api import (
+    ProjectType,
+    ProjectInfo,
+    FileInfo,
+    DependencyInfo,
+    VersionInfo,
+)
 
 __all__ = [
+    # 配置模型
     "ModLoader",
     "OutputFormat",
     "FileType",
@@ -31,4 +38,10 @@ __all__ = [
     "OutputConfig",
     "MetadataConfig",
     "ModFetchConfig",
+    # API 模型
+    "ProjectType",
+    "ProjectInfo",
+    "FileInfo",
+    "DependencyInfo",
+    "VersionInfo",
 ]

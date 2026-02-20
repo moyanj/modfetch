@@ -1,24 +1,32 @@
-from loguru import logger
-import sys
-import os
+"""
+ModFetch - Minecraft 模组下载管理工具
+"""
 
+__version__ = "0.1.0"
 
-def init_logger():
-    if os.environ.get("MODFETCH_DEBUG", "0") == "1":
-        level = "DEBUG"
-        debug_mode = True
-    else:
-        level = "INFO"
-        debug_mode = False
-    logger.remove()
-    logger.add(
-        sink=sys.stdout,
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
-        enqueue=True,
-        level=level,
-        colorize=True,
-        backtrace=debug_mode,
-        diagnose=debug_mode,
-    )
-    if debug_mode:
-        logger.debug("DEBUG 模式已启用")
+# 初始化日志
+from modfetch.logger import setup_logger
+
+setup_logger()
+
+# 导出主要组件
+from modfetch.models import (
+    ModFetchConfig,
+    MinecraftConfig,
+    OutputConfig,
+    MetadataConfig,
+)
+from modfetch.orchestrator import ModFetchOrchestrator
+from modfetch.exceptions import ModFetchError
+from modfetch.logger import logger
+
+__all__ = [
+    "__version__",
+    "ModFetchConfig",
+    "MinecraftConfig",
+    "OutputConfig",
+    "MetadataConfig",
+    "ModFetchOrchestrator",
+    "ModFetchError",
+    "logger",
+]
