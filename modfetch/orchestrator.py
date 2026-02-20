@@ -359,10 +359,10 @@ class ModFetchOrchestrator:
         """为特定版本生成输出文件"""
         output_formats = self.config.output.format
 
-        if "mrpack" in output_formats:
+        if OutputFormat.MRPACK in output_formats:
             await self._generate_mrpack_for_version(version)
 
-        if "zip" in output_formats:
+        if OutputFormat.ZIP in output_formats:
             await self._generate_zip_for_version(version)
 
     async def _generate_mrpack_for_version(self, version: str):
