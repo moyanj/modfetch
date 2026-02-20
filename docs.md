@@ -10,10 +10,14 @@ ModFetch 旨在提供灵活的配置支持，支持`toml`,`yaml`,`json`,`xml`。
 
 | **配置节**    | **描述**                                                     |
 | ------------- | ------------------------------------------------------------ |
-| `[from]`      | 用于指定远程或本地的父配置文件并继承其内容 |
+| `[from]`      | 用于指定远程或本地的父配置文件并继承其内容                   |
 | `[metadata]`  | 包含整合包的元数据，用于 `.mrpack` 自描述格式                |
 | `[minecraft]` | Minecraft 相关设置（版本、模组加载器、资源、模组等下载配置） |
 | `[output]`    | 指定最终输出路径及后处理方式                                 |
+| `max_concurrent` | 最大并发下载数（整数，默认 5）                             |
+| `max_retries` | 下载失败时的最大重试次数（整数，默认 3）                    |
+| `retry_delay` | 重试之间的初始延迟时间（秒，默认 1.0）                      |
+| `features`    | 启用功能列表，用于匹配模组的 `feature` 条件                 |
 
 ---
 
@@ -145,12 +149,17 @@ extra_urls = [
 
 - `download_dir`：最终文件的存储目录
 - `format`：输出格式，支持 `zip` 和 `mrpack`，可指定多个（如 `["zip", "mrpack"]`）
+- `mrpack_modes`：指定生成 `.mrpack` 的模式（数组），支持：
+    - `download`：下载所有模组到整合包内（默认）
+    - `reference`：不下载模组，仅在 `modrinth.index.json` 中引用
 
 #### **示例**
 ```toml
 [output]
 download_dir = "./modpacks"
 format = ["mrpack"]
+# 同时生成“全量下载版”和“引用版”整合包
+mrpack_modes = ["download", "reference"]
 ```
 
 ---
@@ -191,6 +200,13 @@ extra_urls = [
 [output]
 download_dir = "./downloads"
 format = ["zip", "mrpack"]
+mrpack_modes = ["download", "reference"]
+
+# 全局重试与并发配置
+max_concurrent = 10
+max_retries = 5
+retry_delay = 2.0
+features = ["performance", "texture"]
 ```
 
 ---
