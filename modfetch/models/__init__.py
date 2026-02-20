@@ -16,6 +16,7 @@ from modfetch.models.config import (
     OutputConfig,
     MetadataConfig,
     ModFetchConfig,
+    MrpackMode,
 )
 from modfetch.models.api import (
     ProjectType,
@@ -38,6 +39,7 @@ __all__ = [
     "OutputConfig",
     "MetadataConfig",
     "ModFetchConfig",
+    "MrpackMode",
     # API 模型
     "ProjectType",
     "ProjectInfo",

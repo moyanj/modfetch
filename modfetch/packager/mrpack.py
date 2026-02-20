@@ -26,6 +26,7 @@ class MrpackBuilder:
         mc_version: str,
         mod_loader: ModLoader,
         loader_version: Optional[str] = None,
+        files: Optional[list[dict]] = None,
     ) -> str:
         """
         构建 mrpack 文件
@@ -37,6 +38,7 @@ class MrpackBuilder:
             mc_version: Minecraft 版本
             mod_loader: 模组加载器
             loader_version: 加载器版本
+            files: 直接写入 manifest 的文件列表（REFERENCE 模式）
 
         Returns:
             生成的文件路径
@@ -57,13 +59,17 @@ class MrpackBuilder:
                 metadata, mc_version, mod_loader, loader_version
             )
 
+            if files:
+                manifest["files"] = files
+
             # 写入 manifest.json
             manifest_path = os.path.join(temp_dir, "modrinth.index.json")
             async with aiofiles.open(manifest_path, "w", encoding="utf-8") as f:
                 await f.write(json.dumps(manifest, indent=4))
 
             # 复制文件到 overrides
-            await self._copy_to_overrides(source_dir, overrides_dir)
+            if os.path.exists(source_dir) and any(os.listdir(source_dir)):
+                await self._copy_to_overrides(source_dir, overrides_dir)
 
             # 创建 zip 文件
             zip_path = f"{output_path}.zip"

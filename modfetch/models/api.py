@@ -8,7 +8,15 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, List, Dict
 
-from modfetch.models.config import ModLoader, ConditionalEntry, ModEntry, ExtraUrl
+from modfetch.models.config import (
+    ModLoader,
+    ConditionalEntry,
+    ModEntry,
+    ExtraUrl,
+    ConditionalEntry,
+    ModEntry,
+    ExtraUrl,
+)
 
 
 class ProjectType(Enum):

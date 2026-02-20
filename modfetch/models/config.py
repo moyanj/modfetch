@@ -29,6 +29,13 @@ class OutputFormat(Enum):
     MRPACK = "mrpack"
 
 
+class MrpackMode(Enum):
+    """Mrpack 模式"""
+
+    DOWNLOAD = "download"  # 下载所有模组到 overrides
+    REFERENCE = "reference"  # 使用 modrinth.index.json 引用模组（不下载）
+
+
 class FileType(Enum):
     """文件类型"""
 
@@ -120,6 +127,9 @@ class OutputConfig:
 
     download_dir: str = "downloads"
     format: List[OutputFormat] = field(default_factory=lambda: [OutputFormat.ZIP])
+    mrpack_modes: List[MrpackMode] = field(
+        default_factory=lambda: [MrpackMode.DOWNLOAD]
+    )
 
     def __post_init__(self):
         if not self.download_dir:
@@ -297,9 +307,22 @@ class ModFetchConfig:
 
         # 处理输出配置
         output_dict = config_dict.get("output", {})
+
+        # 处理 mrpack_modes
+        raw_modes = output_dict.get("mrpack_modes")
+        if not raw_modes:
+            # 兼容旧的 mrpack_mode
+            old_mode = output_dict.get("mrpack_mode", "download")
+            mrpack_modes = [MrpackMode(old_mode)]
+        else:
+            if isinstance(raw_modes, str):
+                raw_modes = [raw_modes]
+            mrpack_modes = [MrpackMode(m) for m in raw_modes]
+
         output_config = OutputConfig(
             download_dir=output_dict.get("download_dir", "downloads"),
             format=[OutputFormat(fmt) for fmt in output_dict.get("format", ["zip"])],
+            mrpack_modes=mrpack_modes,
         )
 
         # 处理元数据配置
@@ -390,6 +413,7 @@ class ModFetchConfig:
             "output": {
                 "download_dir": self.output.download_dir,
                 "format": [fmt.value for fmt in self.output.format],
+                "mrpack_modes": [m.value for m in self.output.mrpack_modes],
             },
             "metadata": {
                 "name": self.metadata.name,
