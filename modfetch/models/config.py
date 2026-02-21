@@ -94,8 +94,8 @@ class ParentConfig:
     def __post_init__(self):
         if not self.url:
             raise ValueError("ParentConfig 必须提供 url")
-        if self.format not in ["toml", "json", "yaml", "xml"]:
-            raise ValueError(f"不支持的配置格式: {self.format}")
+        if self.format not in ["toml", "json", "yaml", "xml", "mrpack"]:
+            raise ValueError(f"不支持配置格式: {self.format}")
 
 
 @dataclass
@@ -219,16 +219,25 @@ class ModFetchConfig:
                         raise ValueError(
                             f"无法加载父配置: {url} (状态码: {response.status})"
                         )
-                    content = await response.text()
 
-                if fmt == "toml":
-                    parent_dict = toml.loads(content)
-                elif fmt == "json":
-                    parent_dict = json.loads(content)
-                elif fmt == "yaml" or fmt == "yml":
-                    parent_dict = yaml.safe_load(content)
-                else:
-                    raise ValueError(f"不支持的配置格式: {fmt}")
+                    if fmt == "mrpack":
+                        # 处理 mrpack 继承
+                        from modfetch.services.mrpack_resolver import MrpackResolver
+
+                        content_bytes = await response.read()
+                        parent_dict = await MrpackResolver.resolve_to_dict(
+                            content_bytes
+                        )
+                    else:
+                        content = await response.text()
+                        if fmt == "toml":
+                            parent_dict = toml.loads(content)
+                        elif fmt == "json":
+                            parent_dict = json.loads(content)
+                        elif fmt == "yaml" or fmt == "yml":
+                            parent_dict = yaml.safe_load(content)
+                        else:
+                            raise ValueError(f"不支持的配置格式: {fmt}")
 
                 # 递归解析父配置的继承
                 resolved_parent = await cls._resolve_inheritance(parent_dict, session)
