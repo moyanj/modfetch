@@ -17,6 +17,7 @@ def build_with_nuitka():
         "--output-filename=modfetch.bin",
         "--windows-icon-from-ico=logo/logo.ico",
         "--linux-icon=logo/logo_raw.png",
+        "--assume-yes-for-downloads",
         "modfetch/__main__.py",
     ]
     print("\nStarting Nuitka build process with command:")
