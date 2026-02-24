@@ -10,7 +10,7 @@ ModFetch 是一个现代化的 Minecraft 模组打包和下载管理工具，支
 - 自动处理模组依赖关系
 - 多线程下载加速
 - 支持生成标准 `.mrpack` 整合包
-- 支持 Forge/Fabric/Quilt 模组加载器
+- 支持 Forge/Fabric/NeoForge/Quilt 模组加载器（支持同时构建多个）
 - 完整的配置继承机制
 
 ## 📦 安装指南
@@ -23,7 +23,7 @@ pip install modfetch
 # 示例配置文件 mods.toml
 [minecraft]
 version = ["1.21.1"]
-mod_loader = "fabric"
+mod_loader = ["fabric", "forge"] # 支持同时构建多个加载器
 mods = [
     { id = "sodium", feature = "performance" },
     "modmenu"

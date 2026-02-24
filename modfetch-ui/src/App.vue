@@ -87,9 +87,10 @@
               <el-text class="mx-1" type="info">可选择多个版本，或输入自定义版本。<p>例如：["1.21.1", "1.20.4"]</p></el-text>
             </el-form-item>
             <el-form-item label="模组加载器">
-              <el-select v-model="config.minecraft.mod_loader" placeholder="选择模组加载器" style="width: 100%;">
+              <el-select v-model="config.minecraft.mod_loader" multiple placeholder="选择模组加载器" style="width: 100%;">
                 <el-option label="fabric" value="fabric"></el-option>
                 <el-option label="forge" value="forge"></el-option>
+                <el-option label="neoforge" value="neoforge"></el-option>
                 <el-option label="quilt" value="quilt"></el-option>
               </el-select>
             </el-form-item>
@@ -313,7 +314,7 @@ const config = reactive({
   },
   minecraft: {
     version: [],
-    mod_loader: '',
+    mod_loader: [],
     mods: [],
     resourcepacks: [],
     shaderpacks: [],
@@ -435,12 +436,18 @@ const generateConfig = () => {
   }
 
   // Minecraft Section
-  if (config.minecraft.version.length > 0 || config.minecraft.mod_loader ||
+  if (config.minecraft.version.length > 0 || config.minecraft.mod_loader.length > 0 ||
     config.minecraft.mods.length > 0 || config.minecraft.resourcepacks.length > 0 ||
     config.minecraft.shaderpacks.length > 0 || config.minecraft.extra_urls.length > 0) {
     toml += '[minecraft]\n';
     if (config.minecraft.version.length > 0) toml += `version = ${toTomlArray(config.minecraft.version)}\n`;
-    if (config.minecraft.mod_loader) toml += `mod_loader = ${toTomlString(config.minecraft.mod_loader)}\n`;
+    if (config.minecraft.mod_loader.length > 0) {
+      if (config.minecraft.mod_loader.length === 1) {
+        toml += `mod_loader = ${toTomlString(config.minecraft.mod_loader[0])}\n`;
+      } else {
+        toml += `mod_loader = ${toTomlArray(config.minecraft.mod_loader)}\n`;
+      }
+    }
 
     // Mods
     if (config.minecraft.mods.length > 0) {

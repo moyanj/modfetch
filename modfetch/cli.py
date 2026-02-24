@@ -112,7 +112,14 @@ async def run_async(
         if dry_run:
             logger.info("[干运行模式] 配置验证通过")
             logger.info(f"  Minecraft 版本: {config.minecraft.version}")
-            logger.info(f"  模组加载器: {config.minecraft.mod_loader.value}")
+
+            loaders = (
+                config.minecraft.mod_loader
+                if isinstance(config.minecraft.mod_loader, list)
+                else [config.minecraft.mod_loader]
+            )
+            loader_str = ", ".join([l.value for l in loaders])
+            logger.info(f"  模组加载器: {loader_str}")
             logger.info(f"  模组数量: {len(config.minecraft.mods)}")
             logger.info(f"  资源包数量: {len(config.minecraft.resourcepacks)}")
             logger.info(f"  光影包数量: {len(config.minecraft.shaderpacks)}")

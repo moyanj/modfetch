@@ -5,7 +5,7 @@
 **Branch:** master
 
 ## OVERVIEW
-Minecraft mod downloader with Python CLI + Vue 3 UI. Fetches mods from Modrinth API, resolves dependencies, builds modpacks.
+Minecraft mod downloader with Python CLI + Vue 3 UI. Fetches mods from Modrinth API, resolves dependencies, builds modpacks. Supports building for multiple Minecraft versions and mod loaders simultaneously.
 
 ## STRUCTURE
 ```
@@ -13,12 +13,12 @@ Minecraft mod downloader with Python CLI + Vue 3 UI. Fetches mods from Modrinth 
 ├── modfetch/           # Python backend (CLI + core)
 │   ├── api/           # Modrinth API wrapper
 │   ├── download/      # File download
-│   ├── models/        # Data models
+│   ├── models/        # Data models (Supports multi-loader/multi-version)
 │   ├── services/      # Resolvers (dep, mod, version)
 │   ├── packager/      # Modpack creation
 │   └── plugins/       # Plugin system (empty)
 ├── modfetch-ui/       # Vue 3 frontend
-│   └── src/           # Element Plus + VueUse
+│   └── src/           # Element Plus + VueUse (Supports multi-loader selection)
 ├── .github/workflows/ # CI (build.yml, pypi.yml)
 └── build.py           # Nuitka build script
 ```

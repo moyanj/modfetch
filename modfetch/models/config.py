@@ -103,7 +103,7 @@ class MinecraftConfig:
     """Minecraft 相关配置"""
 
     version: List[str] = field(default_factory=list)
-    mod_loader: ModLoader = ModLoader.FABRIC
+    mod_loader: Union[ModLoader, List[ModLoader]] = ModLoader.FABRIC
     mods: List[Union[str, ModEntry]] = field(default_factory=list)
     resourcepacks: List[Union[str, ModEntry]] = field(default_factory=list)
     shaderpacks: List[Union[str, ModEntry]] = field(default_factory=list)
@@ -314,9 +314,16 @@ class ModFetchConfig:
 
         # 处理 Minecraft 配置
         mc_dict = config_dict.get("minecraft", {})
+
+        raw_loader = mc_dict.get("mod_loader", "fabric")
+        if isinstance(raw_loader, list):
+            mod_loader = [ModLoader(l) for l in raw_loader]
+        else:
+            mod_loader = ModLoader(raw_loader)
+
         minecraft_config = MinecraftConfig(
             version=mc_dict.get("version", []),
-            mod_loader=ModLoader(mc_dict.get("mod_loader", "fabric")),
+            mod_loader=mod_loader,
             mods=cls._parse_mod_entries(mc_dict.get("mods", [])),
             resourcepacks=cls._parse_mod_entries(mc_dict.get("resourcepacks", [])),
             shaderpacks=cls._parse_mod_entries(mc_dict.get("shaderpacks", [])),
@@ -415,10 +422,15 @@ class ModFetchConfig:
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
+        if isinstance(self.minecraft.mod_loader, list):
+            loader_val = [l.value for l in self.minecraft.mod_loader]
+        else:
+            loader_val = self.minecraft.mod_loader.value
+
         return {
             "minecraft": {
                 "version": self.minecraft.version,
-                "mod_loader": self.minecraft.mod_loader.value,
+                "mod_loader": loader_val,
                 "mods": self._serialize_mod_entries(self.minecraft.mods),
                 "resourcepacks": self._serialize_mod_entries(
                     self.minecraft.resourcepacks
@@ -494,12 +506,19 @@ class ModFetchConfig:
         if not self.minecraft.mods:
             raise ValueError("必须配置至少一个模组")
 
-        if self.minecraft.mod_loader not in [
-            ModLoader.FORGE,
-            ModLoader.FABRIC,
-            ModLoader.QUILT,
-        ]:
-            raise ValueError("mod_loader 必须为 forge/fabric/quilt")
+        loaders = (
+            self.minecraft.mod_loader
+            if isinstance(self.minecraft.mod_loader, list)
+            else [self.minecraft.mod_loader]
+        )
+        for loader in loaders:
+            if loader not in [
+                ModLoader.FORGE,
+                ModLoader.NEOFORGE,
+                ModLoader.FABRIC,
+                ModLoader.QUILT,
+            ]:
+                raise ValueError(f"无效的 mod_loader: {loader}")
 
         # 验证所有模组条目
         for i, mod in enumerate(self.minecraft.mods):
