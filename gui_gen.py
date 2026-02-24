@@ -27,11 +27,117 @@ class ModFetchGui(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ModFetch Config Generator")
-        self.resize(600, 700)
-
+        self.resize(600, 750)
+        self.apply_style()
         self.init_ui()
 
+    def is_dark_mode(self):
+        """检测系统是否处于暗色模式"""
+        palette = QApplication.palette()
+        color = palette.color(palette.ColorGroup.Active, palette.ColorRole.WindowText)
+        return color.lightness() > 128
+
+    def apply_style(self):
+        # 现代化的 QSS
+        dark = self.is_dark_mode()
+
+        if dark:
+            # 暗色配色
+            bg_main = "#1c1c1e"
+            bg_pane = "#2c2c2e"
+            bg_input = "#1c1c1e"
+            border = "#3a3a3c"
+            text = "#ffffff"
+            tab_inactive = "#3a3a3c"
+        else:
+            # 浅色配色
+            bg_main = "#f5f5f7"
+            bg_pane = "#ffffff"
+            bg_input = "#ffffff"
+            border = "#d1d1d6"
+            text = "#000000"
+            tab_inactive = "#e5e5ea"
+
+        qss = f"""
+        QMainWindow {{
+            background-color: {bg_main};
+            color: {text};
+        }}
+        QLabel {{
+            color: {text};
+        }}
+        QTabWidget::pane {{
+            border: 1px solid {border};
+            background: {bg_pane};
+            border-radius: 8px;
+            top: -1px;
+        }}
+        QTabBar::tab {{
+            background: {tab_inactive};
+            border: 1px solid {border};
+            padding: 8px 16px;
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
+            margin-right: 2px;
+            color: {text};
+        }}
+        QTabBar::tab:selected {{
+            background: {bg_pane};
+            border-bottom-color: {bg_pane};
+            font-weight: bold;
+        }}
+        QGroupBox {{
+            font-weight: bold;
+            border: 1px solid {border};
+            border-radius: 8px;
+            margin-top: 12px;
+            padding-top: 12px;
+            background-color: {bg_pane};
+            color: {text};
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 5px;
+        }}
+        QLineEdit, QTextEdit, QComboBox, QListWidget {{
+            border: 1px solid {border};
+            border-radius: 4px;
+            padding: 5px;
+            background-color: {bg_input};
+            color: {text};
+            selection-background-color: #007aff;
+        }}
+        QLineEdit:focus, QTextEdit:focus {{
+            border: 1.5px solid #007aff;
+        }}
+        QPushButton {{
+            background-color: #007aff;
+            color: white;
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-weight: bold;
+            font-size: 13px;
+        }}
+        QPushButton:hover {{
+            background-color: #0063cc;
+        }}
+        QPushButton:pressed {{
+            background-color: #0051a8;
+        }}
+        QPushButton#secondary {{
+            background-color: {tab_inactive};
+            color: #007aff;
+        }}
+        QPushButton#danger {{
+            background-color: #ff3b30;
+            color: white;
+        }}
+        """
+        self.setStyleSheet(qss)
+
     def init_ui(self):
+
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
@@ -89,6 +195,7 @@ class ModFetchGui(QMainWindow):
         mods_layout.addWidget(self.mod_list)
 
         remove_btn = QPushButton("Remove Selected")
+        remove_btn.setObjectName("danger")
         remove_btn.clicked.connect(self.remove_mod)
         mods_layout.addWidget(remove_btn)
 
@@ -123,11 +230,11 @@ class ModFetchGui(QMainWindow):
         item_text = f"[{mod_type}] {mod}"
 
         # Check for duplicates
-        if self.mod_list.findItems(item_text, Qt.MatchExactly):
+        if self.mod_list.findItems(item_text, Qt.MatchFlag.MatchExactly):
             return
 
         item = QListWidgetItem(item_text)
-        item.setData(Qt.UserRole, (mod_type, mod))
+        item.setData(Qt.ItemDataRole.UserRole, (mod_type, mod))
         self.mod_list.addItem(item)
         self.mod_input.clear()
 
@@ -152,7 +259,7 @@ class ModFetchGui(QMainWindow):
 
             for i in range(self.mod_list.count()):
                 item = self.mod_list.item(i)
-                m_type, slug = item.data(Qt.UserRole)
+                m_type, slug = item.data(Qt.ItemDataRole.UserRole)
                 if m_type == "Mods":
                     mods.append(slug)
                 elif m_type == "Resourcepacks":
