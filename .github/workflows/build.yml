@@ -1,4 +1,4 @@
-name: Build and Upload Modfetch
+name: Build and Test
 
 on:
   push:
@@ -7,57 +7,54 @@ on:
   pull_request:
     branches:
       - master
-  workflow_dispatch: # 允许手动触发工作流
+  workflow_dispatch:
 
 jobs:
-  build_for_platforms:
-    name: Build on ${{ matrix.os }} with Python ${{ matrix.python-version }}
+  build:
+    name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.9"] # 指定 Python 3.9
+        python-version: ["3.10"]
+      fail-fast: false
 
     steps:
-      - name: Checkout Code # 步骤1: 检出代码
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }} # 步骤2: 设置 Python 环境
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install uv and Nuitka with project dependencies # 步骤3: 安装 uv，Nuitka 和项目依赖
+      - name: Install uv and dependencies
         run: |
           pip install uv
-          # 创建虚拟环境
           uv venv
           uv sync --dev
         shell: bash
 
-      - name: Run build script with uv # 步骤5: 运行 Nuitka 构建
-        # 使用 uv run 来确保脚本在虚拟环境中运行，Nuitka 和所有依赖都可用。
+      - name: Build with Nuitka
         run: uv run build.py
         shell: bash
 
-      - name: Rename and archive built executable # 步骤6: 重命名并打包可执行文件
+      - name: Package Binary (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: |
-          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            # Nuitka 在 Linux 上生成名为 'modfetch' 的可执行文件
-            mv modfetch.bin modfetch-linux
-            tar -czf modfetch-linux.tar.gz modfetch-linux
-          else
-            # Nuitka 在 Windows 上生成名为 'modfetch.exe' 的可执行文件
-            mv modfetch.bin modfetch-windows.exe
-            7z a modfetch-windows.zip modfetch-windows.exe
-          fi
-        shell: bash
+          chmod +x modfetch.bin
+          tar -czf modfetch-linux-amd64.tar.gz modfetch.bin
 
-      - name: Upload modfetch artifact # 步骤7: 上传打包好的可执行文件
+      - name: Package Binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          7z a modfetch-windows-amd64.zip modfetch.bin
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: modfetch-build-output-${{ matrix.os }} # 更改名称以反映是构建输出
+          name: build-${{ matrix.os }}
           path: |
-            modfetch-linux.tar.gz
-            modfetch-windows.zip
-          retention-days: 7 # 构建产物保留7天
+            modfetch-linux-amd64.tar.gz
+            modfetch-windows-amd64.zip
+          retention-days: 7
