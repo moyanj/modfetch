@@ -35,7 +35,6 @@ const collapsed = ref(true);
         <McInput
           :model-value="String(configStore.config.retry_delay ?? 1.0)"
           type="number"
-          step="0.1"
           @update:model-value="val => configStore.config.retry_delay = Number(val)"
         />
       </div>

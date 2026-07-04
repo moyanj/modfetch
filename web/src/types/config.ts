@@ -9,6 +9,7 @@ export type FileType = 'mod' | 'file' | 'resourcepack' | 'shaderpack';
 export interface ModEntry {
   id?: string;
   slug?: string;
+  version?: string;
   only_version?: string | string[];
   feature?: string | string[];
 }
@@ -90,5 +91,9 @@ export function createDefaultConfig(): ModFetchConfig {
     max_retries: 3,
     retry_delay: 1.0,
     features: [],
+    plugins: {
+      enabled: [],
+      configs: {},
+    },
   };
 }

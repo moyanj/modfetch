@@ -5,6 +5,7 @@ import { createDefaultConfig } from '@/types/config';
 
 export const useConfigStore = defineStore('config', () => {
   const config = ref<ModFetchConfig>(createDefaultConfig());
+  const validationIssues = ref<Record<string, string>>({});
 
   const modCount = computed(() => config.value.minecraft.mods.length);
   const resourcepackCount = computed(() => config.value.minecraft.resourcepacks.length);
@@ -50,6 +51,18 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
 
+  function normalizeMod(index: number, type: FileType) {
+    let target: (string | ModEntry)[] = [];
+    if (type === 'mod') target = config.value.minecraft.mods;
+    else if (type === 'resourcepack') target = config.value.minecraft.resourcepacks;
+    else if (type === 'shaderpack') target = config.value.minecraft.shaderpacks;
+
+    const item = target[index];
+    if (typeof item === 'string') {
+      target[index] = { slug: item };
+    }
+  }
+
   function addExtraUrl(url: string) {
     config.value.minecraft.extra_urls.push({ url });
   }
@@ -62,11 +75,27 @@ export const useConfigStore = defineStore('config', () => {
     const errors: string[] = [];
     if (!config.value.minecraft.version.length) errors.push('必须选择至少一个 Minecraft 版本');
     if (!config.value.minecraft.mods.length) errors.push('必须添加至少一个模组');
+    errors.push(...Object.values(validationIssues.value));
     return errors;
   }
 
+  function setValidationIssue(key: string, message: string) {
+    validationIssues.value[key] = message;
+  }
+
+  function clearValidationIssue(key: string) {
+    delete validationIssues.value[key];
+  }
+
   function loadFromJson(json: ModFetchConfig) {
-    config.value = json;
+    config.value = {
+      ...json,
+      features: json.features ?? [],
+      plugins: json.plugins ?? {
+        enabled: [],
+        configs: {},
+      },
+    };
   }
 
   function exportToml(): string {
@@ -83,9 +112,12 @@ export const useConfigStore = defineStore('config', () => {
     addMod,
     removeMod,
     updateMod,
+    normalizeMod,
     addExtraUrl,
     removeExtraUrl,
     validate,
+    setValidationIssue,
+    clearValidationIssue,
     loadFromJson,
     exportToml,
   };

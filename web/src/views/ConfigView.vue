@@ -10,6 +10,7 @@ import ModList from '@/components/config/ModList.vue';
 import OutputForm from '@/components/config/OutputForm.vue';
 import AdvancedSettings from '@/components/config/AdvancedSettings.vue';
 import ConfigPreview from '@/components/config/ConfigPreview.vue';
+import FeaturePluginSettings from '@/components/config/FeaturePluginSettings.vue';
 import McButton from '@/components/ui/McButton.vue';
 import McCard from '@/components/ui/McCard.vue';
 
@@ -50,16 +51,13 @@ async function onBuild() {
         </McCard>
         <McCard variant="elevated">
           <div class="config-view__tabs">
-            <button
-              v-for="tab in (['mods', 'resourcepacks', 'shaderpacks'] as const)"
-              :key="tab"
-              :class="['config-view__tab', { 'config-view__tab--active': activeTab === tab }]"
-              @click="activeTab = tab"
-            >
+            <button v-for="tab in (['mods', 'resourcepacks', 'shaderpacks'] as const)" :key="tab"
+              :class="['config-view__tab', { 'config-view__tab--active': activeTab === tab }]" @click="activeTab = tab">
               {{ tab === 'mods' ? '模组' : tab === 'resourcepacks' ? '资源包' : '光影' }}
             </button>
           </div>
-          <ModList :type="activeTab === 'mods' ? 'mod' : activeTab === 'resourcepacks' ? 'resourcepack' : 'shaderpack'" />
+          <ModList
+            :type="activeTab === 'mods' ? 'mod' : activeTab === 'resourcepacks' ? 'resourcepack' : 'shaderpack'" />
         </McCard>
         <McCard variant="elevated">
           <h3 class="config-view__section-title">输出设置</h3>
@@ -72,6 +70,9 @@ async function onBuild() {
       <div class="config-view__side">
         <McCard variant="elevated">
           <ConfigPreview />
+        </McCard>
+        <McCard variant="elevated">
+          <FeaturePluginSettings />
         </McCard>
         <McButton variant="primary" size="lg" @click="onBuild">
           开始构建
