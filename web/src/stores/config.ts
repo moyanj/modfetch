@@ -1,11 +1,17 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import type { ModFetchConfig, ModEntry, ModLoader, FileType } from '@/types/config';
+import type { ValidationIssue, ValidationSuggestion } from '@/types/api';
 import { createDefaultConfig } from '@/types/config';
+
+interface ValidationIssueState {
+  message: string;
+  suggestions?: ValidationSuggestion[];
+}
 
 export const useConfigStore = defineStore('config', () => {
   const config = ref<ModFetchConfig>(createDefaultConfig());
-  const validationIssues = ref<Record<string, string>>({});
+  const validationIssues = ref<Record<string, ValidationIssueState>>({});
 
   const modCount = computed(() => config.value.minecraft.mods.length);
   const resourcepackCount = computed(() => config.value.minecraft.resourcepacks.length);
@@ -74,17 +80,49 @@ export const useConfigStore = defineStore('config', () => {
   function validate(): string[] {
     const errors: string[] = [];
     if (!config.value.minecraft.version.length) errors.push('必须选择至少一个 Minecraft 版本');
-    if (!config.value.minecraft.mods.length) errors.push('必须添加至少一个模组');
-    errors.push(...Object.values(validationIssues.value));
+    if (
+      !config.value.minecraft.mods.length
+      && !config.value.minecraft.resourcepacks.length
+      && !config.value.minecraft.shaderpacks.length
+      && !config.value.minecraft.extra_urls.length
+    ) {
+      errors.push('必须至少添加一个模组、资源包、光影包或额外文件');
+    }
+    errors.push(...Object.values(validationIssues.value).map((issue) => issue.message));
     return errors;
   }
 
-  function setValidationIssue(key: string, message: string) {
-    validationIssues.value[key] = message;
+  function setValidationIssue(
+    key: string,
+    issue: string | ValidationIssueState,
+  ) {
+    validationIssues.value[key] = typeof issue === 'string' ? { message: issue } : issue;
   }
 
   function clearValidationIssue(key: string) {
     delete validationIssues.value[key];
+  }
+
+  function clearValidationIssuesByPrefix(prefix: string) {
+    for (const key of Object.keys(validationIssues.value)) {
+      if (key.startsWith(prefix)) {
+        delete validationIssues.value[key];
+      }
+    }
+  }
+
+  function applyRemoteValidationIssues(issues: ValidationIssue[]) {
+    clearValidationIssuesByPrefix('minecraft.');
+    for (const issue of issues) {
+      setValidationIssue(issue.field, {
+        message: issue.message,
+        suggestions: issue.context?.suggestions,
+      });
+    }
+  }
+
+  function getValidationIssue(key: string) {
+    return validationIssues.value[key];
   }
 
   function loadFromJson(json: ModFetchConfig) {
@@ -102,8 +140,15 @@ export const useConfigStore = defineStore('config', () => {
     return JSON.stringify(config.value, null, 2);
   }
 
+  watch(
+    () => config.value.minecraft,
+    () => clearValidationIssuesByPrefix('minecraft.'),
+    { deep: true },
+  );
+
   return {
     config,
+    validationIssues,
     modCount,
     resourcepackCount,
     shaderpackCount,
@@ -118,6 +163,9 @@ export const useConfigStore = defineStore('config', () => {
     validate,
     setValidationIssue,
     clearValidationIssue,
+    clearValidationIssuesByPrefix,
+    applyRemoteValidationIssues,
+    getValidationIssue,
     loadFromJson,
     exportToml,
   };

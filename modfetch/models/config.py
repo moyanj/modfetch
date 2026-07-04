@@ -513,8 +513,13 @@ class ModFetchConfig:
         if not self.minecraft.version:
             raise ValueError("必须配置 Minecraft 版本")
 
-        if not self.minecraft.mods:
-            raise ValueError("必须配置至少一个模组")
+        if (
+            not self.minecraft.mods
+            and not self.minecraft.resourcepacks
+            and not self.minecraft.shaderpacks
+            and not self.minecraft.extra_urls
+        ):
+            raise ValueError("必须配置至少一个模组、资源包、光影包或额外文件")
 
         loaders = (
             self.minecraft.mod_loader
@@ -530,7 +535,11 @@ class ModFetchConfig:
             ]:
                 raise ValueError(f"无效的 mod_loader: {loader}")
 
-        # 验证所有模组条目
-        for i, mod in enumerate(self.minecraft.mods):
-            if isinstance(mod, ModEntry) and not mod.id and not mod.slug:
-                raise ValueError(f"模组条目 {i} 必须提供 id 或 slug")
+        for group_name, entries in [
+            ("模组", self.minecraft.mods),
+            ("资源包", self.minecraft.resourcepacks),
+            ("光影包", self.minecraft.shaderpacks),
+        ]:
+            for i, item in enumerate(entries):
+                if isinstance(item, ModEntry) and not item.id and not item.slug:
+                    raise ValueError(f"{group_name}条目 {i} 必须提供 id 或 slug")

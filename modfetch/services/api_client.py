@@ -9,6 +9,7 @@ import aiohttp
 
 from modfetch.models import ProjectInfo, VersionInfo
 from modfetch.exceptions import APIError, APINotFoundError
+from modfetch.services.project_validation import build_modrinth_facets
 
 
 MODRINTH_BASE_URL = "https://api.modrinth.com/v2"
@@ -56,6 +57,46 @@ class ModrinthClient:
             project_type=response["project_type"],
             versions=response["versions"],
         )
+
+    async def search_projects(
+        self,
+        query: str,
+        *,
+        project_type: Optional[str] = None,
+        mc_version: Optional[str] = None,
+        mod_loader: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[ProjectInfo]:
+        """搜索项目，供自动补全候选使用"""
+        params = {
+            "query": query,
+            "limit": str(limit),
+        }
+        facets = build_modrinth_facets(
+            project_type=project_type,
+            mc_version=mc_version,
+            mod_loader=mod_loader,
+        )
+        if facets:
+            params["facets"] = facets
+
+        response = await self._request(f"{MODRINTH_BASE_URL}/search", params=params)
+        if response is None:
+            return []
+
+        projects = []
+        for item in response.get("hits", []):
+            project = ProjectInfo(
+                id=item.get("project_id", ""),
+                name=item.get("slug", ""),
+                title=item.get("title", ""),
+                description=item.get("description", ""),
+                project_type=item.get("project_type", ""),
+                versions=[],
+            )
+            setattr(project, "downloads", int(item.get("downloads", 0)))
+            projects.append(project)
+        return projects
 
     async def get_version(
         self,

@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { MinecraftVersionItem } from '@/types/api';
+import type { MinecraftVersionItem, ValidateConfigResponse } from '@/types/api';
 
 export async function getMcVersions(): Promise<MinecraftVersionItem[]> {
   const { data } = await api.get('/minecraft/versions');
@@ -23,4 +23,12 @@ function inferVersionType(version: string): string {
 export async function getLoaders(): Promise<string[]> {
   const { data } = await api.get('/minecraft/loaders');
   return Array.isArray(data) ? data : (data.loaders ?? []).map((item: { name: string }) => item.name);
+}
+
+export async function validateConfig(config: Record<string, unknown>): Promise<ValidateConfigResponse> {
+  const { data } = await api.post('/config/validate', { config });
+  return {
+    valid: Boolean(data.valid),
+    errors: Array.isArray(data.errors) ? data.errors : [],
+  };
 }

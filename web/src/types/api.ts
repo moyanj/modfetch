@@ -48,6 +48,32 @@ export interface SearchResult {
   total_hits: number;
 }
 
+export interface ValidationSuggestion {
+  slug: string;
+  project_id: string;
+  title: string;
+  project_type: string;
+  downloads: number;
+}
+
+export interface ValidationIssue {
+  field: string;
+  code: string;
+  message: string;
+  context?: {
+    identifier?: string;
+    entry_type?: string;
+    actual_type?: string;
+    incompatible_targets?: string[];
+    suggestions?: ValidationSuggestion[];
+  };
+}
+
+export interface ValidateConfigResponse {
+  valid: boolean;
+  errors: ValidationIssue[];
+}
+
 export interface JobState {
   job_id: string;
   status: 'pending' | 'running' | 'completed' | 'failed';

@@ -8,10 +8,12 @@ from modfetch.services.api_client import ModrinthClient
 from modfetch.services.mod_resolver import ModResolver
 from modfetch.services.dependency_resolver import DependencyResolver
 from modfetch.services.version_matcher import VersionMatcher
+from modfetch.services.project_validation import ProjectValidationService
 
 __all__ = [
     "ModrinthClient",
     "ModResolver",
     "DependencyResolver",
     "VersionMatcher",
+    "ProjectValidationService",
 ]

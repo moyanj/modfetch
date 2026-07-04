@@ -18,6 +18,12 @@ from modfetch.exceptions import ModFetchError
 from modfetch.models import ModFetchConfig
 from modfetch.server import schemas
 from modfetch.server.jobs import JobManager
+from modfetch.services import ModrinthClient
+from modfetch.services.project_validation import (
+    ProjectValidationService,
+    build_modrinth_facets,
+    validation_issue_to_dict,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -102,6 +108,13 @@ async def validate_config(
     try:
         config = ModFetchConfig.from_dict(request.config)
         config.validate()
+        async with ModrinthClient() as client:
+            result = await ProjectValidationService(client).validate_config(config)
+        if not result.valid:
+            errors.extend(
+                schemas.ValidationErrorItem(**validation_issue_to_dict(issue))
+                for issue in result.issues
+            )
     except ValueError as e:
         errors.append(
             schemas.ValidationErrorItem(
@@ -116,6 +129,7 @@ async def validate_config(
                 field="config",
                 code=e.code,
                 message=e.message,
+                context=e.context,
             )
         )
     except Exception as e:
@@ -147,7 +161,25 @@ async def create_job(
 
     # 先验证配置
     try:
-        ModFetchConfig.from_dict(request.config)
+        config = ModFetchConfig.from_dict(request.config)
+        config.validate()
+        async with ModrinthClient() as client:
+            result = await ProjectValidationService(client).validate_config(config)
+        if not result.valid:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": True,
+                    "code": "E102",
+                    "message": "远端校验失败",
+                    "context": {
+                        "issues": [
+                            validation_issue_to_dict(issue)
+                            for issue in result.issues
+                        ]
+                    },
+                },
+            )
     except (ValueError, ModFetchError) as e:
         raise HTTPException(
             status_code=400,
@@ -194,6 +226,9 @@ async def search(
     limit: int = 20,
     offset: int = 0,
     facets: Optional[str] = None,
+    type: Optional[str] = None,
+    loader: Optional[str] = None,
+    version: Optional[str] = None,
 ) -> schemas.SearchResponse:
     """代理 Modrinth 搜索 API"""
     params: dict[str, str] = {
@@ -201,8 +236,13 @@ async def search(
         "limit": str(limit),
         "offset": str(offset),
     }
-    if facets:
-        params["facets"] = facets
+    merged_facets = facets or build_modrinth_facets(
+        project_type=type,
+        mc_version=version,
+        mod_loader=loader,
+    )
+    if merged_facets:
+        params["facets"] = merged_facets
 
     async with aiohttp.ClientSession() as session:
         async with session.get(

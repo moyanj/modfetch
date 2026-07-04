@@ -2,6 +2,8 @@
 import { ref, watch } from 'vue';
 import { useConfigStore } from '@/stores/config';
 import type { FileType, ModEntry } from '@/types/config';
+import type { ProjectInfo, ValidationSuggestion } from '@/types/api';
+import { searchMods } from '@/api/search';
 import McButton from '@/components/ui/McButton.vue';
 import McInput from '@/components/ui/McInput.vue';
 import McTag from '@/components/ui/McTag.vue';
@@ -13,6 +15,9 @@ const props = defineProps<{
 const configStore = useConfigStore();
 const newSlug = ref('');
 const expanded = ref<number[]>([]);
+const suggestions = ref<ProjectInfo[]>([]);
+const searching = ref(false);
+let searchTimer: number | undefined;
 
 const listMap: Record<FileType, keyof typeof configStore.config.minecraft> = {
   mod: 'mods',
@@ -29,11 +34,22 @@ function refresh() {
 }
 
 watch(() => configStore.config.minecraft, () => refresh(), { deep: true, immediate: true });
+watch(newSlug, (value) => {
+  if (searchTimer) window.clearTimeout(searchTimer);
+  if (!value.trim()) {
+    suggestions.value = [];
+    return;
+  }
+  searchTimer = window.setTimeout(() => {
+    void fetchSuggestions(value.trim());
+  }, 180);
+});
 
 function add() {
   if (!newSlug.value.trim()) return;
   configStore.addMod(newSlug.value.trim(), props.type);
   newSlug.value = '';
+  suggestions.value = [];
   refresh();
 }
 
@@ -92,6 +108,47 @@ function updateField(index: number, patch: Partial<ModEntry>) {
   configStore.updateMod(index, props.type, patch);
   refresh();
 }
+
+function issueKey(index: number) {
+  const group = props.type === 'mod'
+    ? 'mods'
+    : props.type === 'resourcepack'
+      ? 'resourcepacks'
+      : 'shaderpacks';
+  return `minecraft.${group}[${index}]`;
+}
+
+function getIssue(index: number) {
+  return configStore.getValidationIssue(issueKey(index));
+}
+
+function applySuggestion(suggestion: ProjectInfo | ValidationSuggestion, index?: number) {
+  const slug = 'name' in suggestion ? suggestion.name : suggestion.slug;
+  if (typeof index === 'number') {
+    updateField(index, { slug, id: undefined });
+    return;
+  }
+  newSlug.value = slug;
+  suggestions.value = [];
+}
+
+async function fetchSuggestions(query: string) {
+  searching.value = true;
+  try {
+    const primaryLoader = Array.isArray(configStore.config.minecraft.mod_loader)
+      ? configStore.config.minecraft.mod_loader[0]
+      : configStore.config.minecraft.mod_loader;
+    const primaryVersion = configStore.config.minecraft.version[0];
+    const result = await searchMods(query, {
+      type: props.type === 'shaderpack' ? 'shader' : props.type,
+      loader: props.type === 'mod' ? primaryLoader : undefined,
+      version: primaryVersion,
+    }, 0, 5);
+    suggestions.value = result.hits;
+  } finally {
+    searching.value = false;
+  }
+}
 </script>
 
 <template>
@@ -99,6 +156,21 @@ function updateField(index: number, patch: Partial<ModEntry>) {
     <div class="mod-list__add">
       <McInput v-model="newSlug" placeholder="输入模组 slug 或 ID..." @keyup.enter="add" />
       <McButton variant="primary" size="sm" @click="add">添加</McButton>
+    </div>
+    <div v-if="newSlug.trim()" class="mod-list__suggestions">
+      <div v-if="searching" class="mod-list__suggestion-empty">搜索中...</div>
+      <button
+        v-for="suggestion in suggestions"
+        :key="suggestion.id"
+        class="mod-list__suggestion"
+        @click="applySuggestion(suggestion)"
+      >
+        <span class="mod-list__suggestion-name">{{ suggestion.title || suggestion.name }}</span>
+        <span class="mod-list__suggestion-slug">{{ suggestion.name }}</span>
+      </button>
+      <div v-if="!searching && suggestions.length === 0" class="mod-list__suggestion-empty">
+        没有候选
+      </div>
     </div>
     <div class="mod-list__items">
       <div v-for="(item, index) in items" :key="index" class="mod-list__item">
@@ -166,6 +238,19 @@ function updateField(index: number, patch: Partial<ModEntry>) {
             </div>
           </div>
         </div>
+        <div v-if="getIssue(index)" class="mod-list__issue">
+          <p class="mod-list__issue-text">{{ getIssue(index)?.message }}</p>
+          <div v-if="getIssue(index)?.suggestions?.length" class="mod-list__issue-suggestions">
+            <button
+              v-for="suggestion in getIssue(index)?.suggestions"
+              :key="`${index}-${suggestion.project_id}`"
+              class="mod-list__issue-suggestion"
+              @click="applySuggestion(suggestion, index)"
+            >
+              使用 {{ suggestion.slug }}
+            </button>
+          </div>
+        </div>
       </div>
       <div v-if="items.length === 0" class="mod-list__empty">暂无项目</div>
     </div>
@@ -185,6 +270,47 @@ function updateField(index: number, patch: Partial<ModEntry>) {
   gap: var(--space-2);
   max-height: 420px;
   overflow-y: auto;
+}
+
+.mod-list__suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2);
+  background-color: rgba(18, 26, 25, 0.92);
+  border: 1px solid var(--border-stone-dark);
+  border-radius: var(--radius-sm);
+}
+
+.mod-list__suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mod-list__suggestion:hover {
+  border-color: var(--border-glow);
+  background-color: rgba(77, 208, 225, 0.08);
+}
+
+.mod-list__suggestion-name {
+  font-family: 'Outfit', sans-serif;
+}
+
+.mod-list__suggestion-slug,
+.mod-list__suggestion-empty {
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .mod-list__item {
@@ -280,6 +406,35 @@ function updateField(index: number, patch: Partial<ModEntry>) {
 .mod-list__editor {
   border-top: 1px solid var(--border-stone-dark);
   padding-top: var(--space-3);
+}
+
+.mod-list__issue {
+  padding: var(--space-3);
+  background-color: rgba(157, 46, 46, 0.12);
+  border: 1px solid rgba(221, 88, 88, 0.35);
+  border-radius: var(--radius-sm);
+}
+
+.mod-list__issue-text {
+  color: #ffb3b3;
+  font-size: 12px;
+}
+
+.mod-list__issue-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.mod-list__issue-suggestion {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid rgba(255, 179, 179, 0.35);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: #ffd3d3;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .mod-list__grid {

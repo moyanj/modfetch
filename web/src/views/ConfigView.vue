@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useConfigStore } from '@/stores/config';
 import { useBuildStore } from '@/stores/build';
+import { validateConfig as validateConfigApi } from '@/api/meta';
 import MetadataForm from '@/components/config/MetadataForm.vue';
 import VersionSelector from '@/components/config/VersionSelector.vue';
 import LoaderSelector from '@/components/config/LoaderSelector.vue';
@@ -26,6 +27,13 @@ async function onBuild() {
     return;
   }
   try {
+    const validation = await validateConfigApi(configStore.config);
+    configStore.applyRemoteValidationIssues(validation.errors);
+    if (!validation.valid) {
+      alert(validation.errors.map(issue => issue.message).join('\n'));
+      return;
+    }
+
     const jobId = await buildStore.startJob(configStore.config);
     router.push(`/build/${jobId}`);
   } catch (e) {

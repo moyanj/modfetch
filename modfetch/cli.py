@@ -17,6 +17,8 @@ from modfetch.models import ModFetchConfig
 from modfetch.orchestrator import ModFetchOrchestrator
 from modfetch.exceptions import ModFetchError
 from modfetch.logger import setup_logger
+from modfetch.services import ModrinthClient
+from modfetch.services.project_validation import ensure_remote_config_valid
 
 
 def load_config(config_path: str) -> dict:
@@ -91,7 +93,11 @@ async def run_async(
         # 加载配置
         config_dict = load_config(config_path)
         config = ModFetchConfig.from_dict(config_dict)
+        config.validate()
         config.features = features
+
+        async with ModrinthClient() as client:
+            await ensure_remote_config_valid(config, client=client)
 
         # 从配置加载插件（Nuitka 环境使用）
         if config.plugins.enabled:

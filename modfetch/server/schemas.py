@@ -149,6 +149,7 @@ class ValidationErrorItem(BaseModel):
     field: str
     code: str
     message: str
+    context: Optional[dict[str, object]] = None
 
 
 class ValidateConfigResponse(BaseModel):

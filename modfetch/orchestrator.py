@@ -105,8 +105,13 @@ class ModFetchOrchestrator:
         if not self.config.minecraft.version:
             raise ConfigError("请配置 Minecraft 版本")
 
-        if not self.config.minecraft.mods:
-            raise ConfigError("请配置至少一个模组")
+        if (
+            not self.config.minecraft.mods
+            and not self.config.minecraft.resourcepacks
+            and not self.config.minecraft.shaderpacks
+            and not self.config.minecraft.extra_urls
+        ):
+            raise ConfigError("请配置至少一个模组、资源包、光影包或额外文件")
 
         loaders = (
             self.config.minecraft.mod_loader
