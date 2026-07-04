@@ -242,7 +242,6 @@ modfetch/
 │   ├── services/      # 解析器服务
 │   ├── packager/      # 打包器
 │   └── plugins/       # 插件系统
-├── modfetch-ui/       # Vue 3 前端（可选）
 ├── examples/          # 示例配置和插件
 └── pyproject.toml     # 项目配置
 ```
