@@ -90,8 +90,10 @@ class ModrinthClient:
                     version_info = VersionInfo.from_modrinth(version)
                     primary_file = self._get_primary_file(version)
                     return version_info, primary_file
+            # 指定了特定版本但未找到，不降级到最新版本
+            return None, None
 
-        # 返回第一个版本
+        # 返回第一个（最新）版本
         version = response[0]
         version_info = VersionInfo.from_modrinth(version)
         primary_file = self._get_primary_file(version)

@@ -59,6 +59,7 @@ class ModEntry(ConditionalEntry):
 
     id: Optional[str] = None
     slug: Optional[str] = None
+    version: Optional[str] = None
     condition: Optional[ConditionalEntry] = None
 
     def __post_init__(self):
@@ -382,16 +383,23 @@ class ModFetchConfig:
     def _parse_mod_entries(
         entries: List[Any],
     ) -> List[Union[str, ModEntry]]:
-        """解析模组条目"""
+        """解析模组条目，支持 slug/id@version 语法"""
         result = []
         for entry in entries:
             if isinstance(entry, str):
-                result.append(entry)
+                if "@" in entry:
+                    identifier, version = entry.split("@", 1)
+                    result.append(
+                        ModEntry(id=identifier, version=version)
+                    )
+                else:
+                    result.append(entry)
             elif isinstance(entry, dict):
                 result.append(
                     ModEntry(
                         id=entry.get("id"),
                         slug=entry.get("slug"),
+                        version=entry.get("version"),
                         only_version=entry.get("only_version"),
                         feature=entry.get("feature"),
                     )
@@ -491,6 +499,8 @@ class ModFetchConfig:
                     entry_dict["id"] = entry.id
                 if entry.slug:
                     entry_dict["slug"] = entry.slug
+                if entry.version:
+                    entry_dict["version"] = entry.version
                 if entry.only_version:
                     entry_dict["only_version"] = entry.only_version
                 if entry.feature:

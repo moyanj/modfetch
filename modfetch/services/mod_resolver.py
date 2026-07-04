@@ -35,11 +35,13 @@ class ModResolver:
         Returns:
             tuple: (project_info, version_info, file_info) 或 None
         """
-        # 提取模组标识
+        # 提取模组标识和版本固定信息
         if isinstance(mod, str):
             mod_id = mod
+            pinned_version = None
         else:
             mod_id = mod.id or mod.slug
+            pinned_version = mod.version
 
         if not mod_id:
             return None
@@ -55,9 +57,9 @@ class ModResolver:
         if not project_info:
             return None
 
-        # 获取版本信息
+        # 获取版本信息（支持版本固定）
         version_info, file_info = await self.client.get_version(
-            project_info.id, mc_version, mod_loader
+            project_info.id, mc_version, mod_loader, specific_version=pinned_version
         )
 
         if not version_info or not file_info:
