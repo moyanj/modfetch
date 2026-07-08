@@ -57,7 +57,7 @@ jobs:
       - name: Package Binary (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          Ren-Item -Path "modfetch.bin.exe" -NewName "modfetch.exe" -ErrorAction SilentlyContinue
+          Rename-Item -Path "modfetch.bin.exe" -NewName "modfetch.exe" -ErrorAction SilentlyContinue
           7z a modfetch-windows-amd64.zip modfetch.exe
           echo "ASSET_NAME=modfetch-windows-amd64.zip" >> $env:GITHUB_ENV
           echo "ASSET_PATH=modfetch-windows-amd64.zip" >> $env:GITHUB_ENV
