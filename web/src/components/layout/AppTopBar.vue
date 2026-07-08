@@ -17,12 +17,13 @@ const currentTitle = computed(() => pageTitles[String(route.name ?? '')] || 'Mod
 
 const statusMap: Record<string, { text: string; color: string }> = {
   idle: { text: '就绪', color: 'var(--text-muted)' },
+  pending: { text: '排队中', color: 'var(--accent-gold)' },
   running: { text: '构建中', color: 'var(--primary)' },
   completed: { text: '完成', color: 'var(--status-success)' },
   failed: { text: '失败', color: 'var(--status-error)' },
 };
 
-const currentStatus = statusMap[buildStore.phase] || statusMap.idle;
+const currentStatus = computed(() => statusMap[buildStore.jobStatus] || statusMap.idle);
 </script>
 
 <template>

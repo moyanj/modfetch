@@ -74,16 +74,44 @@ export interface ValidateConfigResponse {
   errors: ValidationIssue[];
 }
 
+export interface JobResultItem {
+  filename: string;
+  path: string;
+  size: number;
+  format: string;
+  mc_version: string;
+  loader: string;
+}
+
+export interface JobErrorItem {
+  code: string;
+  message: string;
+  context?: Record<string, unknown> | null;
+}
+
+export interface JobStats {
+  total_mods: number;
+  resolved: number;
+  downloaded: number;
+  failed: number;
+  bytes_downloaded: number;
+}
+
 export interface JobState {
-  job_id: string;
+  id: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   phase: 'resolve' | 'download' | 'package' | 'idle';
-  progress: number;
-  config_summary?: Record<string, unknown>;
+  stats: JobStats;
+  results: JobResultItem[] | null;
+  errors: JobErrorItem[] | null;
+  started_at: string | null;
+  completed_at: string | null;
 }
 
 export interface JobSummary {
-  job_id: string;
+  id: string;
   status: string;
-  created_at: string;
+  phase: string;
+  started_at: string | null;
+  completed_at: string | null;
 }

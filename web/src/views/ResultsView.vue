@@ -1,12 +1,21 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router';
+import { computed, onMounted, onUnmounted, watch } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
+import { storeToRefs } from 'pinia';
 import { useBuildStore } from '@/stores/build';
+import { useWebSocket } from '@/composables/useWebSocket';
+import { buildJobStreamUrl } from '@/api/jobs';
 import McButton from '@/components/ui/McButton.vue';
 import McCard from '@/components/ui/McCard.vue';
 import McBadge from '@/components/ui/McBadge.vue';
 
 const router = useRouter();
+const route = useRoute();
 const buildStore = useBuildStore();
+const { lastEvent, status, connect } = useWebSocket();
+const { jobStatus } = storeToRefs(buildStore);
+const jobId = computed(() => String(route.params.id ?? ''));
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -29,11 +38,68 @@ function onNewConfig() {
   buildStore.reset();
   router.push('/');
 }
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function startPolling(jobIdValue: string) {
+  stopPolling();
+  pollTimer = setInterval(async () => {
+    await buildStore.hydrateJob(jobIdValue);
+    if (buildStore.jobStatus === 'completed' || buildStore.jobStatus === 'failed') {
+      stopPolling();
+    }
+  }, 1000);
+}
+
+async function syncJob(jobIdValue: string) {
+  if (!jobIdValue) return;
+
+  await buildStore.hydrateJob(jobIdValue);
+  if (buildStore.jobStatus === 'pending' || buildStore.jobStatus === 'running') {
+    connect(buildJobStreamUrl(jobIdValue));
+    startPolling(jobIdValue);
+  } else {
+    stopPolling();
+  }
+}
+
+onMounted(() => {
+  void syncJob(jobId.value);
+});
+
+watch(jobId, (nextJobId) => {
+  void syncJob(nextJobId);
+});
+
+watch(lastEvent, (event) => {
+  if (!event) return;
+
+  buildStore.handleEvent(event);
+  if (event.event === 'job_complete' || event.event === 'job_failed') {
+    stopPolling();
+  }
+});
+
+watch(status, (value) => {
+  buildStore.connectionStatus = value;
+}, { immediate: true });
+
+onUnmounted(() => {
+  stopPolling();
+});
 </script>
 
 <template>
   <div class="results-view">
     <h2 class="results-view__title">构建结果</h2>
+    <McCard v-if="jobStatus === 'pending' || jobStatus === 'running'" variant="elevated" class="results-view__pending">
+      任务仍在运行，结果会在完成后自动更新。
+    </McCard>
     <div v-if="buildStore.results.length === 0 && buildStore.errors.length === 0" class="results-view__empty-state">
       <h3 class="results-view__empty-title">还没有构建结果</h3>
       <p class="results-view__empty-text">任务完成后，输出文件和错误日志会显示在这里。</p>
@@ -104,6 +170,10 @@ function onNewConfig() {
   align-items: center;
   justify-content: space-between;
   padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-6);
+}
+
+.results-view__pending {
   margin-bottom: var(--space-6);
 }
 

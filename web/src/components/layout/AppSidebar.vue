@@ -1,15 +1,18 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import appLogo from '../../../../logo/logo_raw.png';
+import { useBuildStore } from '@/stores/build';
 
 const route = useRoute();
+const buildStore = useBuildStore();
 
-const navItems = [
+const navItems = computed(() => [
   { path: '/', label: '配置项目', icon: 'M' },
   { path: '/search', label: '搜索模组', icon: 'S' },
-  { path: '/build/', label: '构建进度', icon: 'B' },
-  { path: '/results/', label: '构建结果', icon: 'R' },
-];
+  { path: buildStore.currentJobId ? `/build/${buildStore.currentJobId}` : '/', label: '构建进度', icon: 'B' },
+  { path: buildStore.currentJobId ? `/results/${buildStore.currentJobId}` : '/', label: '构建结果', icon: 'R' },
+]);
 
 function isActive(path: string) {
   if (path === '/') return route.path === '/';
@@ -31,7 +34,7 @@ function isActive(path: string) {
     <nav class="app-sidebar__nav">
       <router-link
         v-for="item in navItems"
-        :key="item.path"
+        :key="item.label"
         :to="item.path"
         :class="['app-sidebar__item', { 'app-sidebar__item--active': isActive(item.path) }]"
       >

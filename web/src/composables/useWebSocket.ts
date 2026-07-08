@@ -9,19 +9,25 @@ export function useWebSocket() {
   const lastEvent = ref<WsEvent | null>(null);
 
   let ws: WebSocket | null = null;
+  let currentUrl: string | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   function connect(url: string) {
-    if (ws) return;
+    if (ws && currentUrl === url) return;
+    disconnect();
 
     status.value = 'connecting';
-    ws = new WebSocket(url);
+    currentUrl = url;
+    const socket = new WebSocket(url);
+    ws = socket;
 
-    ws.onopen = () => {
+    socket.onopen = () => {
+      if (ws !== socket) return;
       status.value = 'open';
     };
 
-    ws.onmessage = (message) => {
+    socket.onmessage = (message) => {
+      if (ws !== socket) return;
       try {
         const event = JSON.parse(message.data) as WsEvent;
         events.value.push(event);
@@ -31,12 +37,15 @@ export function useWebSocket() {
       }
     };
 
-    ws.onclose = () => {
+    socket.onclose = () => {
+      if (ws !== socket) return;
       status.value = 'closed';
       ws = null;
+      currentUrl = null;
     };
 
-    ws.onerror = () => {
+    socket.onerror = () => {
+      if (ws !== socket) return;
       status.value = 'error';
     };
   }
@@ -47,9 +56,11 @@ export function useWebSocket() {
       reconnectTimer = null;
     }
     if (ws) {
-      ws.close();
+      const socket = ws;
       ws = null;
+      socket.close();
     }
+    currentUrl = null;
     status.value = 'closed';
   }
 

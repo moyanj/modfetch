@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, onMounted, onUnmounted, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useBuildStore } from '@/stores/build';
 import { useWebSocket } from '@/composables/useWebSocket';
+import { buildJobStreamUrl } from '@/api/jobs';
 import PhaseIndicator from '@/components/build/PhaseIndicator.vue';
 import DownloadItem from '@/components/build/DownloadItem.vue';
 import StatsCard from '@/components/build/StatsCard.vue';
@@ -10,21 +11,72 @@ import McProgress from '@/components/ui/McProgress.vue';
 import McCard from '@/components/ui/McCard.vue';
 
 const route = useRoute();
+const router = useRouter();
 const buildStore = useBuildStore();
-  const { events, connect } = useWebSocket();
+const { lastEvent, status, connect } = useWebSocket();
 
-const jobId = route.params.id as string;
+const jobId = computed(() => String(route.params.id ?? ''));
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function startPolling(jobIdValue: string) {
+  stopPolling();
+  pollTimer = setInterval(async () => {
+    await buildStore.hydrateJob(jobIdValue);
+    if (buildStore.jobStatus === 'completed' || buildStore.jobStatus === 'failed') {
+      stopPolling();
+      await router.replace(`/results/${jobIdValue}`);
+    }
+  }, 1000);
+}
+
+async function syncJob(jobIdValue: string) {
+  if (!jobIdValue) return;
+
+  await buildStore.hydrateJob(jobIdValue);
+  if (buildStore.jobStatus === 'completed' || buildStore.jobStatus === 'failed') {
+    stopPolling();
+    await router.replace(`/results/${jobIdValue}`);
+    return;
+  }
+
+  if (buildStore.jobStatus === 'pending' || buildStore.jobStatus === 'running') {
+    connect(buildJobStreamUrl(jobIdValue));
+    startPolling(jobIdValue);
+  }
+}
 
 onMounted(() => {
-  if (jobId) {
-    connect(`ws://localhost:8000/api/jobs/${jobId}/stream`);
+  void syncJob(jobId.value);
+});
+
+watch(jobId, (nextJobId) => {
+  void syncJob(nextJobId);
+});
+
+watch(lastEvent, (event) => {
+  if (!event) return;
+
+  buildStore.handleEvent(event);
+  if (event.event === 'job_complete' || event.event === 'job_failed') {
+    stopPolling();
+    void router.replace(`/results/${jobId.value}`);
   }
 });
 
-watch(events, (newEvents) => {
-  const last = newEvents[newEvents.length - 1];
-  if (last) buildStore.handleEvent(last);
-}, { deep: true });
+watch(status, (value) => {
+  buildStore.connectionStatus = value;
+}, { immediate: true });
+
+onUnmounted(() => {
+  stopPolling();
+});
 </script>
 
 <template>

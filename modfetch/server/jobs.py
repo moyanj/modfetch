@@ -80,6 +80,7 @@ class JobState:
     completed_at: Optional[datetime] = None
     results: list[JobResultItem] = field(default_factory=list)
     errors: list[JobErrorItem] = field(default_factory=list)
+    event_history: list[dict[str, object]] = field(default_factory=list)
 
     # 事件订阅
     _subscribers: list[asyncio.Queue[dict[str, object]]] = field(
@@ -101,8 +102,63 @@ class JobState:
 
     async def broadcast(self, event: dict[str, object]) -> None:
         """将事件推送到所有订阅者队列"""
+        self._record_event(event)
+        self._apply_event(event)
         for queue in self._subscribers:
             await queue.put(event)
+
+    def _record_event(self, event: dict[str, object]) -> None:
+        """记录任务事件历史，供晚订阅的客户端回放。"""
+        self.event_history.append(event)
+        if len(self.event_history) > 512:
+            self.event_history.pop(0)
+
+    def _apply_event(self, event: dict[str, object]) -> None:
+        """将事件折叠到当前任务状态快照。"""
+        event_type = event.get("event")
+        data = event.get("data")
+        if not isinstance(data, dict):
+            return
+
+        if event_type == "job_started":
+            self.status = "running"
+            return
+
+        if event_type == "phase_change":
+            phase = data.get("phase")
+            if isinstance(phase, str):
+                self.phase = phase
+            return
+
+        if event_type == "stats_update":
+            total = _safe_int(data.get("total"), self.stats.total_mods)
+            completed = _safe_int(data.get("completed"), self.stats.downloaded)
+            failed = _safe_int(data.get("failed"), self.stats.failed)
+            bytes_downloaded = _safe_int(
+                data.get("bytes_downloaded"), self.stats.bytes_downloaded
+            )
+            self.stats.total_mods = total
+            self.stats.downloaded = completed
+            self.stats.failed = failed
+            self.stats.bytes_downloaded = bytes_downloaded
+            return
+
+        if event_type == "resolve_complete":
+            self.stats.resolved += 1
+            return
+
+        if event_type == "job_complete":
+            self.status = "completed"
+            self.phase = "idle"
+            self.results = _parse_results(data.get("results"))
+            return
+
+        if event_type == "job_failed":
+            self.status = "failed"
+            self.phase = "idle"
+            error = _parse_error(data.get("error"))
+            if error is not None and not _has_error(self.errors, error):
+                self.errors.append(error)
 
     def to_response_dict(self) -> dict[str, object]:
         """转换为 API 响应字典"""
@@ -303,37 +359,10 @@ class JobManager:
         if job is None:
             return
 
-        # 如果任务已结束，直接返回最终状态
+        for event in job.event_history:
+            yield event
+
         if job.status in ("completed", "failed"):
-            if job.status == "completed":
-                yield {
-                    "event": "job_complete",
-                    "data": {
-                        "results": [
-                            {
-                                "filename": r.filename,
-                                "path": r.path,
-                                "size": r.size,
-                                "format": r.format,
-                                "mc_version": r.mc_version,
-                                "loader": r.loader,
-                            }
-                            for r in job.results
-                        ],
-                        "duration_ms": job.duration_ms,
-                    },
-                }
-            else:
-                error = job.errors[-1] if job.errors else None
-                yield {
-                    "event": "job_failed",
-                    "data": {
-                        "error": {
-                            "code": error.code if error else "E500",
-                            "message": error.message if error else "Unknown error",
-                        }
-                    },
-                }
             return
 
         # 创建订阅者队列
@@ -419,3 +448,67 @@ class JobManager:
                             )
 
         return results
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    """安全转换整数。"""
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_results(value: object) -> list[JobResultItem]:
+    """从事件数据解析结果列表。"""
+    if not isinstance(value, list):
+        return []
+
+    results: list[JobResultItem] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        filename = item.get("filename")
+        path = item.get("path")
+        fmt = item.get("format")
+        mc_version = item.get("mc_version")
+        loader = item.get("loader")
+        if not all(
+            isinstance(field, str)
+            for field in (filename, path, fmt, mc_version, loader)
+        ):
+            continue
+        results.append(
+            JobResultItem(
+                filename=filename,
+                path=path,
+                size=_safe_int(item.get("size")),
+                format=fmt,
+                mc_version=mc_version,
+                loader=loader,
+            )
+        )
+    return results
+
+
+def _parse_error(value: object) -> Optional[JobErrorItem]:
+    """从事件数据解析错误对象。"""
+    if not isinstance(value, dict):
+        return None
+
+    code = value.get("code")
+    message = value.get("message")
+    if not isinstance(code, str) or not isinstance(message, str):
+        return None
+
+    context = value.get("context")
+    if context is not None and not isinstance(context, dict):
+        context = None
+    return JobErrorItem(code=code, message=message, context=context)
+
+
+def _has_error(errors: list[JobErrorItem], target: JobErrorItem) -> bool:
+    """判断错误是否已存在，避免事件折叠重复写入。"""
+    return any(
+        error.code == target.code and error.message == target.message
+        for error in errors
+    )

@@ -2,9 +2,11 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { ModFetchConfig } from '@/types/config';
 import type { WsEvent } from '@/types/events';
-import { createJob } from '@/api/jobs';
+import { createJob, getJob } from '@/api/jobs';
+import type { JobState } from '@/types/api';
 
 type BuildPhase = 'idle' | 'resolve' | 'download' | 'package';
+type JobStatus = 'idle' | 'pending' | 'running' | 'completed' | 'failed';
 
 interface ResolveItem {
   mod_slug: string;
@@ -46,6 +48,7 @@ interface BuildResult {
 
 export const useBuildStore = defineStore('build', () => {
   const currentJobId = ref<string | null>(null);
+  const jobStatus = ref<JobStatus>('idle');
   const phase = ref<BuildPhase>('idle');
   const resolveItems = ref<ResolveItem[]>([]);
   const downloadItems = ref<DownloadItem[]>([]);
@@ -55,8 +58,9 @@ export const useBuildStore = defineStore('build', () => {
   const connectionStatus = ref<'connecting' | 'open' | 'closed' | 'error'>('closed');
   const durationMs = ref(0);
 
-  const isRunning = computed(() => phase.value !== 'idle');
+  const isRunning = computed(() => jobStatus.value === 'pending' || jobStatus.value === 'running');
   const overallProgress = computed(() => {
+    if (jobStatus.value === 'completed') return 100;
     if (!stats.value.total) return 0;
     return Math.round(((stats.value.completed + stats.value.failed + stats.value.skipped) / stats.value.total) * 100);
   });
@@ -65,14 +69,39 @@ export const useBuildStore = defineStore('build', () => {
     reset();
     const { job_id } = await createJob(config);
     currentJobId.value = job_id;
+    jobStatus.value = 'pending';
     return job_id;
+  }
+
+  async function hydrateJob(jobId: string): Promise<void> {
+    applyJobSnapshot(await getJob(jobId));
+  }
+
+  function applyJobSnapshot(job: JobState) {
+    currentJobId.value = job.id;
+    jobStatus.value = job.status;
+    phase.value = job.status === 'running' || job.status === 'pending' ? job.phase : 'idle';
+    stats.value = {
+      total: job.stats.total_mods,
+      completed: job.stats.downloaded,
+      failed: job.stats.failed,
+      skipped: 0,
+      bytes_downloaded: job.stats.bytes_downloaded,
+    };
+    results.value = job.results ?? [];
+    errors.value = (job.errors ?? []).map(error => ({
+      code: error.code,
+      message: error.message,
+    }));
+    durationMs.value = computeDurationMs(job.started_at, job.completed_at);
   }
 
   function handleEvent(event: WsEvent) {
     switch (event.event) {
       case 'job_started':
         currentJobId.value = event.data.job_id;
-        phase.value = 'idle';
+        jobStatus.value = 'running';
+        phase.value = 'resolve';
         break;
       case 'phase_change':
         phase.value = event.data.phase;
@@ -158,11 +187,13 @@ export const useBuildStore = defineStore('build', () => {
         stats.value = event.data;
         break;
       case 'job_complete':
+        jobStatus.value = 'completed';
         phase.value = 'idle';
         results.value = event.data.results;
         durationMs.value = event.data.duration_ms;
         break;
       case 'job_failed':
+        jobStatus.value = 'failed';
         phase.value = 'idle';
         errors.value.push(event.data.error);
         break;
@@ -171,6 +202,7 @@ export const useBuildStore = defineStore('build', () => {
 
   function reset() {
     currentJobId.value = null;
+    jobStatus.value = 'idle';
     phase.value = 'idle';
     resolveItems.value = [];
     downloadItems.value = [];
@@ -182,6 +214,7 @@ export const useBuildStore = defineStore('build', () => {
 
   return {
     currentJobId,
+    jobStatus,
     phase,
     resolveItems,
     downloadItems,
@@ -193,7 +226,18 @@ export const useBuildStore = defineStore('build', () => {
     isRunning,
     overallProgress,
     startJob,
+    hydrateJob,
+    applyJobSnapshot,
     handleEvent,
     reset,
   };
 });
+
+function computeDurationMs(startedAt: string | null, completedAt: string | null): number {
+  if (!startedAt) return 0;
+
+  const startMs = Date.parse(startedAt);
+  const endMs = Date.parse(completedAt ?? startedAt);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) return 0;
+  return Math.max(0, endMs - startMs);
+}

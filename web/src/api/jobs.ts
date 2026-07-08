@@ -20,3 +20,12 @@ export async function listJobs(): Promise<JobSummary[]> {
 export async function cancelJob(jobId: string): Promise<void> {
   await api.post(`/jobs/${jobId}/cancel`);
 }
+
+export function buildJobStreamUrl(jobId: string, origin = window.location.origin): string {
+  const base = new URL(origin);
+  base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+  base.pathname = `/api/jobs/${jobId}/stream`;
+  base.search = '';
+  base.hash = '';
+  return base.toString();
+}
