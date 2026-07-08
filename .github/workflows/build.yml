@@ -36,7 +36,7 @@ jobs:
         shell: bash
 
       - name: Build with Nuitka
-        run: uv run build.py
+        run: uv run nuitka_build.py
         shell: bash
 
       - name: Package Binary (Linux)

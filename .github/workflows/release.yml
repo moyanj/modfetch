@@ -43,7 +43,7 @@ jobs:
         shell: bash
 
       - name: Build with Nuitka
-        run: uv run build.py
+        run: uv run nuitka_build.py
         shell: bash
 
       - name: Package Binary (Linux)
@@ -62,20 +62,26 @@ jobs:
           echo "ASSET_NAME=modfetch-windows-amd64.zip" >> $env:GITHUB_ENV
           echo "ASSET_PATH=modfetch-windows-amd64.zip" >> $env:GITHUB_ENV
 
-      - name: Upload Artifact
+      - name: Upload Artifact (Linux)
+        if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.os }}
-          path: |
-            modfetch-linux-amd64.tar.gz
-            modfetch-windows-amd64.zip
+          path: modfetch-linux-amd64.tar.gz
+          retention-days: 1
+
+      - name: Upload Artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.os }}
+          path: modfetch-windows-amd64.zip
           retention-days: 1
 
   # 构建并发布到 PyPI
   publish-pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs: build-binaries
     environment: pypi
 
     steps:
