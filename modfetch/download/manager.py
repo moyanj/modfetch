@@ -103,8 +103,8 @@ class DownloadManager:
         """
         file_path = os.path.join(download_dir, filename)
 
-        # 确保目录存在
-        os.makedirs(download_dir, exist_ok=True)
+        # 确保父目录存在（支持 filename 含子目录路径）
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         # 处理本地文件
         if url.startswith("file://"):

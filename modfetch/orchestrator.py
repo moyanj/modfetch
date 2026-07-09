@@ -11,6 +11,7 @@ from typing import List, Optional, Set
 from loguru import logger
 
 from modfetch.models import (
+    FileType,
     ModFetchConfig,
     ModEntry,
     ModLoader,
@@ -426,12 +427,18 @@ class ModFetchOrchestrator:
                 logger.debug(f"额外 URL {extra.url} 被过滤")
                 continue
 
-            category = extra.type.value.replace("pack", "packs")
+            # type=file 的文件直接放到版本根目录（overrides 根目录）
+            if extra.type == FileType.FILE:
+                download_dir = version_dir
+                category = "file"
+            else:
+                category = extra.type.value.replace("pack", "packs")
+                download_dir = os.path.join(version_dir, category)
 
             await self.download_manager.enqueue(
                 url=extra.url,
                 filename=extra.filename or extra.url.split("/")[-1],
-                download_dir=os.path.join(version_dir, category),
+                download_dir=download_dir,
                 sha1=extra.sha1,
                 category=category,
             )
