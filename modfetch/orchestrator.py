@@ -6,6 +6,7 @@
 
 import os
 import shutil
+import tempfile
 from typing import List, Optional, Set
 
 from loguru import logger
@@ -49,6 +50,7 @@ class ModFetchOrchestrator:
         self._processed_mods: Set[str] = set()
         self._skipped_mods: List[str] = []
         self._mrpack_files: List[dict] = []  # 存储用于 mrpack index 的文件信息
+        self._extra_urls_destinations: List[str] = []  # 记录 extra_urls 的目标路径
 
     def _on_download_progress(self, filename: str, percent: float):
         """下载进度回调"""
@@ -134,6 +136,7 @@ class ModFetchOrchestrator:
         self._processed_mods = set()
         self._skipped_mods = []
         self._mrpack_files = []
+        self._extra_urls_destinations = []
 
         await self._process_version(version, loader)
 
@@ -435,13 +438,22 @@ class ModFetchOrchestrator:
                 category = extra.type.value.replace("pack", "packs")
                 download_dir = os.path.join(version_dir, category)
 
+            # 从 URL 提取文件名时去掉尾部斜杠，避免空字符串
+            url_basename = extra.url.rstrip("/").split("/")[-1]
+
             await self.download_manager.enqueue(
                 url=extra.url,
-                filename=extra.filename or extra.url.split("/")[-1],
+                filename=extra.filename or url_basename,
                 download_dir=download_dir,
                 sha1=extra.sha1,
                 category=category,
             )
+
+            # 记录目标路径，用于 REFERENCE 模式下仍包含 extra_urls 文件到 overrides
+            dest_path = os.path.join(
+                download_dir, extra.filename or url_basename
+            )
+            self._extra_urls_destinations.append(dest_path)
             logger.success(f"额外 URL '{extra.filename}' 已加入下载队列")
 
     async def _generate_outputs_for_version(self, version: str, loader: ModLoader):
@@ -486,17 +498,36 @@ class ModFetchOrchestrator:
             output_name = f"{metadata['name']}_{metadata['version']}_MC{version}-{loader.value}{suffix}"
             output_path = os.path.join(self.config.output.download_dir, output_name)
 
-            # 在 REFERENCE 模式下，source_dir 内容不应进入 overrides，但临时目录结构仍需正确
-            actual_source = (
-                source_dir
-                if mode == MrpackMode.DOWNLOAD
-                else os.path.join(source_dir, "non_existent_empty_dir")
-            )
+            # 在 REFERENCE 模式下，source_dir 内容不应进入 overrides
+            # 但 extra_urls 的本地文件仍需要进入 overrides
+            if mode == MrpackMode.DOWNLOAD:
+                actual_source = source_dir
+            else:
+                # REFERENCE 模式：默认使用空目录
+                actual_source = os.path.join(source_dir, "non_existent_empty_dir")
+                os.makedirs(actual_source, exist_ok=True)
+
+                # 如果有 extra_urls 文件，创建临时目录将其纳入 overrides
+                if self._extra_urls_destinations:
+                    extra_source = tempfile.mkdtemp(
+                        prefix="modfetch_extra_overrides_"
+                    )
+                    for dest in self._extra_urls_destinations:
+                        if os.path.exists(dest):
+                            rel_path = os.path.relpath(dest, source_dir)
+                            override_dest = os.path.join(extra_source, rel_path)
+                            if os.path.isdir(dest):
+                                shutil.copytree(
+                                    dest, override_dest, dirs_exist_ok=True
+                                )
+                            else:
+                                os.makedirs(
+                                    os.path.dirname(override_dest), exist_ok=True
+                                )
+                                shutil.copy2(dest, override_dest)
+                    actual_source = extra_source
 
             try:
-                if mode == MrpackMode.REFERENCE:
-                    os.makedirs(actual_source, exist_ok=True)
-
                 mrpack_path = await self.mrpack_builder.build(
                     source_dir=actual_source,
                     output_path=output_path,
@@ -517,11 +548,7 @@ class ModFetchOrchestrator:
             except Exception as e:
                 logger.error(f"mrpack ({mode.value}) 生成失败: {e}")
             finally:
-                if (
-                    mode == MrpackMode.REFERENCE
-                    and os.path.exists(actual_source)
-                    and "non_existent_empty_dir" in actual_source
-                ):
+                if mode == MrpackMode.REFERENCE and os.path.exists(actual_source):
                     shutil.rmtree(actual_source)
 
     async def _generate_zip_for_version(self, version: str, loader: ModLoader):
