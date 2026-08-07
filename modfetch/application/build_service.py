@@ -69,7 +69,9 @@ class BuildApplicationService:
                 raise ConfigValidationError(message)
 
         # 3. 生成构建计划
-        plan, _report = await self._plan_build.execute(config, config.features)
+        plan, _report = await self._plan_build.execute(
+            config, config.features, event_sink=sink, job_id=job_id
+        )
         await self._publish(
             sink, job_id, EventType.PLAN_CREATED,
             {

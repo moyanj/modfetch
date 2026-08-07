@@ -38,7 +38,9 @@ from modfetch.domain.config_models import (
     MrpackMode,
     OutputFormat,
 )
+from modfetch.domain.events import BuildEvent, EventType
 from modfetch.ports.catalog import CatalogPort
+from modfetch.ports.event_sink import EventSink
 from modfetch.services.mod_resolver import ModResolver
 from modfetch.services.version_matcher import VersionMatcher
 
@@ -81,9 +83,15 @@ class PlanBuild:
         return self._catalog
 
     async def execute(
-        self, config: ModFetchConfig, features: Optional[List[str]] = None
+        self,
+        config: ModFetchConfig,
+        features: Optional[List[str]] = None,
+        event_sink: Optional[EventSink] = None,
+        job_id: str = "",
     ) -> Tuple[BuildPlan, PlanReport]:
         features = features if features is not None else config.features
+        self._sink = event_sink
+        self._job_id = job_id
 
         targets = self._expand_targets(config)
         all_artifacts: List[ResolvedArtifact] = []
@@ -181,10 +189,27 @@ class PlanBuild:
             await self._emit_hook(
                 "pre_resolve", version=version, mod_entry=mod_entry
             )
+            mod_slug = (
+                mod_entry.slug or mod_entry.id if mod_entry else str(mod)
+            )
+            await self._emit_event(
+                EventType.RESOLVE_STARTED,
+                target,
+                {
+                    "mod_slug": mod_slug or "unknown",
+                    "mc_version": version,
+                    "loader": loader.value,
+                },
+            )
 
             result = await self._mod_resolver.resolve(mod, version, loader.value)
             if not result:
                 skipped.append(str(mod))
+                await self._emit_event(
+                    EventType.RESOLVE_FAILED,
+                    target,
+                    {"mod_slug": mod_slug or "unknown"},
+                )
                 continue
 
             project_info, version_info, file_info = result
@@ -196,6 +221,16 @@ class PlanBuild:
                     "project_info": project_info,
                     "version_info": version_info,
                     "file_info": file_info,
+                },
+            )
+            await self._emit_event(
+                EventType.RESOLVE_COMPLETED,
+                target,
+                {
+                    "mod_slug": project_info.name,
+                    "title": project_info.title,
+                    "version": version_info.version,
+                    "dependencies": len(version_info.dependencies),
                 },
             )
 
@@ -327,3 +362,16 @@ class PlanBuild:
     async def _emit_hook(self, name: str, **kwargs: Any) -> None:
         if self._hook is not None:
             await self._hook(name, **kwargs)
+
+    async def _emit_event(
+        self, event_type: EventType, target: BuildTarget, payload: Dict[str, Any]
+    ) -> None:
+        """发布统一构建事件（提供 event_sink 时）"""
+        if getattr(self, "_sink", None) is not None:
+            await self._sink.publish(
+                BuildEvent(
+                    job_id=getattr(self, "_job_id", ""),
+                    event_type=event_type,
+                    payload={"target": target.dir_name, **payload},
+                )
+            )

@@ -3,5 +3,11 @@
 from modfetch.adapters.events.null_sink import NullEventSink
 from modfetch.adapters.events.log_sink import LogEventSink
 from modfetch.adapters.events.composite_sink import CompositeEventSink
+from modfetch.adapters.events.job_sink import JobEventSink
 
-__all__ = ["NullEventSink", "LogEventSink", "CompositeEventSink"]
+__all__ = [
+    "NullEventSink",
+    "LogEventSink",
+    "CompositeEventSink",
+    "JobEventSink",
+]
