@@ -34,13 +34,10 @@ mods = [
     "sodium",
     "sound-physics-remastered",
     "i18nupdatemod",
-    "memoryleakfix",
     "distanthorizons",
     "controlling",
     "modernfix",
     "no-chat-reports",
-    "starlight",
-    "lazydfu",
     "krypton",
 ]
 
