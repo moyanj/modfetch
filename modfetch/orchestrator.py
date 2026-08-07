@@ -104,31 +104,51 @@ class ModFetchOrchestrator:
         await self.plugin_manager.execute_hook(hook_type, context)
 
     def _validate_config(self):
-        """验证配置"""
-        if not self.config.minecraft.version:
-            raise ConfigError("请配置 Minecraft 版本")
+        """验证配置（委托给 ModFetchConfig.validate）"""
+        try:
+            self.config.validate()
+        except ValueError as e:
+            raise ConfigError(str(e)) from e
 
-        if (
-            not self.config.minecraft.mods
-            and not self.config.minecraft.resourcepacks
-            and not self.config.minecraft.shaderpacks
-            and not self.config.minecraft.extra_urls
-        ):
-            raise ConfigError("请配置至少一个模组、资源包、光影包或额外文件")
+    @staticmethod
+    def _build_mrpack_entry(
+        subdir: str, file_info: dict, env: Optional[dict[str, str]] = None
+    ) -> dict:
+        """构建 mrpack 文件条目
 
-        loaders = (
-            self.config.minecraft.mod_loader
-            if isinstance(self.config.minecraft.mod_loader, list)
-            else [self.config.minecraft.mod_loader]
+        Args:
+            subdir: 子目录名 (mods/resourcepacks/shaderpacks)
+            file_info: 文件信息字典
+            env: 环境标记，默认 {"client": "required", "server": "required"}
+        """
+        return {
+            "path": f"{subdir}/{file_info['filename']}",
+            "hashes": file_info.get("hashes", {}),
+            "env": env or {"client": "required", "server": "required"},
+            "downloads": [file_info["url"]],
+            "fileSize": file_info.get("size", 0),
+        }
+
+    @property
+    def _needs_download(self) -> bool:
+        """是否需要下载文件"""
+        return (
+            MrpackMode.DOWNLOAD in self.config.output.mrpack_modes
+            or OutputFormat.ZIP in self.config.output.format
         )
-        for loader in loaders:
-            if loader not in [
-                ModLoader.FORGE,
-                ModLoader.NEOFORGE,
-                ModLoader.FABRIC,
-                ModLoader.QUILT,
-            ]:
-                raise ConfigError(f"无效的 mod_loader: {loader}")
+
+    async def _enqueue_download(
+        self, subdir: str, file_info: dict, project_name: str, version_dir: str
+    ):
+        """添加到下载队列"""
+        await self.download_manager.enqueue(
+            url=file_info["url"],
+            filename=file_info["filename"],
+            download_dir=os.path.join(version_dir, subdir),
+            sha1=file_info.get("hashes", {}).get("sha1"),
+            category=subdir,
+        )
+        logger.success(f"'{project_name}' 已加入下载队列")
 
     async def _process_version_loader(self, version: str, loader: ModLoader):
         """处理特定的版本和加载器组合"""
@@ -167,10 +187,18 @@ class ModFetchOrchestrator:
         await self._process_mods(version, loader, version_dir)
 
         # 处理资源包
-        await self._process_resourcepacks(version, loader, version_dir)
+        await self._process_entries(
+            self.config.minecraft.resourcepacks, "resourcepacks",
+            {"client": "required", "server": "optional"}, "资源包",
+            version, loader, version_dir,
+        )
 
         # 处理光影包
-        await self._process_shaderpacks(version, loader, version_dir)
+        await self._process_entries(
+            self.config.minecraft.shaderpacks, "shaderpacks",
+            {"client": "required", "server": "optional"}, "光影包",
+            version, loader, version_dir,
+        )
 
         # 处理额外 URL
         await self._process_extra_urls(version, version_dir)
@@ -230,33 +258,13 @@ class ModFetchOrchestrator:
             self._processed_mods.add(project_info.id)
             logger.info(f"正在分析模组 '{project_info.name}' (ID: {project_info.id})")
 
-            # 记录到 mrpack 文件列表 (用于 REFERENCE 模式)
+            # 记录到 mrpack 文件列表
             self._mrpack_files.append(
-                {
-                    "path": f"mods/{file_info['filename']}",
-                    "hashes": file_info.get("hashes", {}),
-                    "env": {"client": "required", "server": "required"},
-                    "downloads": [file_info["url"]],
-                    "fileSize": file_info.get("size", 0),
-                }
+                self._build_mrpack_entry("mods", file_info)
             )
 
-            # 如果包含 DOWNLOAD 模式或者是其他输出格式，则需要下载
-            should_download = (
-                MrpackMode.DOWNLOAD in self.config.output.mrpack_modes
-                or OutputFormat.ZIP in self.config.output.format
-            )
-
-            if should_download:
-                # 添加到下载队列
-                await self.download_manager.enqueue(
-                    url=file_info["url"],
-                    filename=file_info["filename"],
-                    download_dir=os.path.join(version_dir, "mods"),
-                    sha1=file_info.get("hashes", {}).get("sha1"),
-                    category="mods",
-                )
-                logger.success(f"模组 '{project_info.name}' 已加入下载队列")
+            if self._needs_download:
+                await self._enqueue_download("mods", file_info, project_info.name, version_dir)
             else:
                 logger.info(f"模组 '{project_info.name}' 已记录引用 (跳过下载)")
 
@@ -295,128 +303,57 @@ class ModFetchOrchestrator:
 
             # 记录到 mrpack 文件列表
             self._mrpack_files.append(
-                {
-                    "path": f"mods/{dep_file['filename']}",
-                    "hashes": dep_file.get("hashes", {}),
-                    "env": {"client": "required", "server": "required"},
-                    "downloads": [dep_file["url"]],
-                    "fileSize": dep_file.get("size", 0),
-                }
+                self._build_mrpack_entry("mods", dep_file)
             )
 
-            should_download = (
-                MrpackMode.DOWNLOAD in self.config.output.mrpack_modes
-                or OutputFormat.ZIP in self.config.output.format
-            )
-
-            if should_download:
-                await self.download_manager.enqueue(
-                    url=dep_file["url"],
-                    filename=dep_file["filename"],
-                    download_dir=os.path.join(version_dir, "mods"),
-                    sha1=dep_file.get("hashes", {}).get("sha1"),
-                    category="mods",
-                )
+            if self._needs_download:
+                await self._enqueue_download("mods", dep_file, dep_info.name, version_dir)
             else:
                 logger.debug(f"依赖 '{dep_info.name}' 已记录引用")
 
-    async def _process_resourcepacks(
-        self, version: str, loader: ModLoader, version_dir: str
+    async def _process_entries(
+        self,
+        entries: list,
+        subdir: str,
+        env: dict[str, str],
+        label: str,
+        version: str,
+        loader: ModLoader,
+        version_dir: str,
     ):
-        """处理资源包"""
-        if not self.config.minecraft.resourcepacks:
+        """处理资源包/光影包条目（参数化消除重复）
+
+        Args:
+            entries: 条目列表
+            subdir: 子目录名
+            env: mrpack 环境标记
+            label: 日志显示名（如 "资源包"）
+        """
+        if not entries:
             return
 
-        logger.info(f"开始处理 {len(self.config.minecraft.resourcepacks)} 个资源包...")
+        logger.info(f"开始处理 {len(entries)} 个{label}...")
 
-        for pack in self.config.minecraft.resourcepacks:
-            if not self._should_include(pack, version):
+        for entry in entries:
+            if not self._should_include(entry, version):
                 continue
 
-            result = await self.resolver.resolve(pack, version, loader.value)
+            result = await self.resolver.resolve(entry, version, loader.value)
 
             if not result:
-                logger.warning(f"无法解析资源包: {pack}")
+                logger.warning(f"无法解析{label}: {entry}")
                 continue
 
             project_info, version_info, file_info = result
 
-            # 记录到 mrpack 文件列表
             self._mrpack_files.append(
-                {
-                    "path": f"resourcepacks/{file_info['filename']}",
-                    "hashes": file_info.get("hashes", {}),
-                    "env": {"client": "required", "server": "optional"},
-                    "downloads": [file_info["url"]],
-                    "fileSize": file_info.get("size", 0),
-                }
+                self._build_mrpack_entry(subdir, file_info, env)
             )
 
-            should_download = (
-                MrpackMode.DOWNLOAD in self.config.output.mrpack_modes
-                or OutputFormat.ZIP in self.config.output.format
-            )
-
-            if should_download:
-                await self.download_manager.enqueue(
-                    url=file_info["url"],
-                    filename=file_info["filename"],
-                    download_dir=os.path.join(version_dir, "resourcepacks"),
-                    sha1=file_info.get("hashes", {}).get("sha1"),
-                    category="resourcepacks",
-                )
-                logger.success(f"资源包 '{project_info.name}' 已加入下载队列")
+            if self._needs_download:
+                await self._enqueue_download(subdir, file_info, project_info.name, version_dir)
             else:
-                logger.info(f"资源包 '{project_info.name}' 已记录引用")
-
-    async def _process_shaderpacks(
-        self, version: str, loader: ModLoader, version_dir: str
-    ):
-        """处理光影包"""
-        if not self.config.minecraft.shaderpacks:
-            return
-
-        logger.info(f"开始处理 {len(self.config.minecraft.shaderpacks)} 个光影包...")
-
-        for pack in self.config.minecraft.shaderpacks:
-            if not self._should_include(pack, version):
-                continue
-
-            result = await self.resolver.resolve(pack, version, loader.value)
-
-            if not result:
-                logger.warning(f"无法解析光影包: {pack}")
-                continue
-
-            project_info, version_info, file_info = result
-
-            # 记录到 mrpack 文件列表
-            self._mrpack_files.append(
-                {
-                    "path": f"shaderpacks/{file_info['filename']}",
-                    "hashes": file_info.get("hashes", {}),
-                    "env": {"client": "required", "server": "optional"},
-                    "downloads": [file_info["url"]],
-                    "fileSize": file_info.get("size", 0),
-                }
-            )
-
-            should_download = (
-                MrpackMode.DOWNLOAD in self.config.output.mrpack_modes
-                or OutputFormat.ZIP in self.config.output.format
-            )
-
-            if should_download:
-                await self.download_manager.enqueue(
-                    url=file_info["url"],
-                    filename=file_info["filename"],
-                    download_dir=os.path.join(version_dir, "shaderpacks"),
-                    sha1=file_info.get("hashes", {}).get("sha1"),
-                    category="shaderpacks",
-                )
-                logger.success(f"光影包 '{project_info.name}' 已加入下载队列")
-            else:
-                logger.info(f"光影包 '{project_info.name}' 已记录引用")
+                logger.info(f"{label} '{project_info.name}' 已记录引用")
 
     async def _process_extra_urls(self, version: str, version_dir: str):
         """处理额外 URL"""

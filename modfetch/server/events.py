@@ -193,8 +193,16 @@ class ServerOrchestrator(ModFetchOrchestrator):
         )
 
         await self._process_mods(version, loader, version_dir)
-        await self._process_resourcepacks(version, loader, version_dir)
-        await self._process_shaderpacks(version, loader, version_dir)
+        await self._process_entries(
+            self.config.minecraft.resourcepacks, "resourcepacks",
+            {"client": "required", "server": "optional"}, "资源包",
+            version, loader, version_dir,
+        )
+        await self._process_entries(
+            self.config.minecraft.shaderpacks, "shaderpacks",
+            {"client": "required", "server": "optional"}, "光影包",
+            version, loader, version_dir,
+        )
         await self._process_extra_urls(version, version_dir)
 
         # 广播 phase_change → download
