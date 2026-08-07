@@ -59,6 +59,8 @@ class ResolvedArtifact:
     hashes: Dict[str, str]
     destination: str  # 相对于版本目录的路径
     target: BuildTarget
+    size: int = 0
+    origin: str = "catalog"  # "catalog"（平台解析）/ "extra_url"（额外URL）
     environment: Dict[str, str] = field(
         default_factory=lambda: {"client": "required", "server": "required"}
     )
@@ -74,7 +76,7 @@ class ResolvedArtifact:
             "hashes": self.hashes,
             "env": self.environment,
             "downloads": [self.url],
-            "fileSize": 0,
+            "fileSize": self.size,
         }
 
 

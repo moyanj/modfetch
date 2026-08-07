@@ -1,34 +1,50 @@
 """
-主协调器
+主协调器（过渡形态）
 
-整合所有服务层组件，实现下载流程编排。
+编排职责已迁移:
+- 解析/展开 → application.plan_build.PlanBuild（产出 BuildPlan）
+- 本类仅保留: 插件 Hook 桥接、按 plan 驱动下载与打包、统计
+
+将随 BuildApplicationService（阶段 8）落地而退役。
 """
 
 import os
 import shutil
 import tempfile
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from loguru import logger
 
+from modfetch.application.plan_build import PlanBuild, PlanReport
+from modfetch.domain.build_plan import (
+    BuildPlan,
+    BuildTarget,
+    OutputSpec,
+    ResolvedArtifact,
+)
 from modfetch.models import (
-    FileType,
     ModFetchConfig,
-    ModEntry,
     ModLoader,
     MrpackMode,
     OutputFormat,
 )
 from modfetch.services import (
     ModrinthClient,
-    ModResolver,
-    DependencyResolver,
     VersionMatcher,
 )
 from modfetch.download import DownloadManager
 from modfetch.packager import MrpackBuilder, ZipBuilder
-from modfetch.exceptions import ConfigError, DownloadError
+from modfetch.exceptions import ConfigError
 from modfetch.plugins import PluginManager, HookType, HookContext
+
+
+#: PlanBuild 事件名 → 插件 HookType 映射
+_PLAN_HOOK_MAP = {
+    "pre_resolve": HookType.PRE_RESOLVE,
+    "post_resolve": HookType.POST_RESOLVE,
+    "pre_resolve_dependencies": HookType.PRE_RESOLVE_DEPENDENCIES,
+    "post_resolve_dependencies": HookType.POST_RESOLVE_DEPENDENCIES,
+}
 
 
 class ModFetchOrchestrator:
@@ -39,18 +55,17 @@ class ModFetchOrchestrator:
     ):
         self.config = config
         self.client = ModrinthClient()
-        self.resolver = ModResolver(self.client)
-        self.dep_resolver = DependencyResolver(self.client)
         self.version_matcher = VersionMatcher(self.client)
         self.download_manager: DownloadManager
         self.mrpack_builder = MrpackBuilder()
         self.zip_builder = ZipBuilder()
         self.plugin_manager = plugin_manager or PluginManager()
 
-        self._processed_mods: Set[str] = set()
-        self._skipped_mods: List[str] = []
-        self._mrpack_files: List[dict] = []  # 存储用于 mrpack index 的文件信息
-        self._extra_urls_destinations: List[str] = []  # 记录 extra_urls 的目标路径
+        self._plan: Optional[BuildPlan] = None
+        self._plan_report: Optional[PlanReport] = None
+        self._processed_by_target: Dict[BuildTarget, Set[str]] = {}
+        self._skipped_by_target: Dict[BuildTarget, List[str]] = {}
+        self._last_target: Optional[BuildTarget] = None
 
     def _on_download_progress(self, filename: str, percent: float):
         """下载进度回调"""
@@ -69,18 +84,35 @@ class ModFetchOrchestrator:
             # Hook: 配置验证完成
             await self._execute_hook(HookType.CONFIG_VALIDATED)
 
-            # 获取所有需要处理的加载器
-            loaders = (
-                self.config.minecraft.mod_loader
-                if isinstance(self.config.minecraft.mod_loader, list)
-                else [self.config.minecraft.mod_loader]
+            # 生成构建计划（解析全部 target 的模组/依赖/资源）
+            plan_builder = PlanBuild(
+                self.client,
+                version_matcher=self.version_matcher,
+                hook=self._plan_hook,
+            )
+            self._plan, self._plan_report = await plan_builder.execute(
+                self.config, self.config.features
             )
 
-            # 处理每个 Minecraft 版本和加载器组合
-            for version in self.config.minecraft.version:
-                for loader in loaders:
-                    logger.info(f"处理 Minecraft {version} ({loader.value})...")
-                    await self._process_version_loader(version, loader)
+            # 记录每个 target 的处理/跳过统计（保持旧 get_stats 语义）
+            for target in self._plan.targets:
+                self._processed_by_target[target] = {
+                    a.project_id
+                    for a in self._plan.artifacts_for(target)
+                    if a.category.value == "mods" and a.origin == "catalog"
+                }
+                self._skipped_by_target[target] = list(
+                    self._plan_report.skipped_by_target.get(target, ())
+                )
+
+            # 逐 target 下载 + 打包
+            for target in self._plan.targets:
+                logger.info(
+                    f"处理 Minecraft {target.minecraft_version} "
+                    f"({target.loader.value})..."
+                )
+                self._last_target = target
+                await self._process_version(target.minecraft_version, target.loader)
 
             logger.success("ModFetch 任务完成!")
 
@@ -90,10 +122,14 @@ class ModFetchOrchestrator:
         finally:
             await self.client.close()
 
+    async def _plan_hook(self, name: str, **kwargs) -> None:
+        """PlanBuild 事件 → 插件 Hook 桥接"""
+        hook_type = _PLAN_HOOK_MAP.get(name)
+        if hook_type is not None:
+            await self._execute_hook(hook_type, **kwargs)
+
     async def _execute_hook(self, hook_type: HookType, **kwargs) -> None:
         """执行指定类型的 Hook"""
-        from modfetch.plugins import HookContext
-
         context = HookContext(
             config=self.config,
             version=kwargs.get("version"),
@@ -137,71 +173,53 @@ class ModFetchOrchestrator:
             or OutputFormat.ZIP in self.config.output.format
         )
 
-    async def _enqueue_download(
-        self, subdir: str, file_info: dict, project_name: str, version_dir: str
-    ):
-        """添加到下载队列"""
-        await self.download_manager.enqueue(
-            url=file_info["url"],
-            filename=file_info["filename"],
-            download_dir=os.path.join(version_dir, subdir),
-            sha1=file_info.get("hashes", {}).get("sha1"),
-            category=subdir,
-        )
-        logger.success(f"'{project_name}' 已加入下载队列")
+    # -- 下载阶段 -----------------------------------------------------------
 
-    async def _process_version_loader(self, version: str, loader: ModLoader):
-        """处理特定的版本和加载器组合"""
-        # 重置状态，因为每个组合需要独立的依赖树和处理列表
-        self._processed_mods = set()
-        self._skipped_mods = []
-        self._mrpack_files = []
-        self._extra_urls_destinations = []
+    def _find_target(self, version: str, loader: ModLoader) -> BuildTarget:
+        """定位当前处理的 BuildTarget"""
+        assert self._plan is not None
+        for target in self._plan.targets:
+            if target.minecraft_version == version and target.loader == loader:
+                return target
+        raise KeyError(f"BuildTarget 不存在: {version}/{loader.value}")
 
-        await self._process_version(version, loader)
+    def _version_dir(self, target: BuildTarget) -> str:
+        return os.path.join(self.config.output.download_dir, target.dir_name)
 
-        # 生成该版本和加载器的输出
-        await self._generate_outputs_for_version(version, loader)
-
-    async def _process_version(self, version: str, loader: ModLoader):
-        """处理单个版本 (已适配多加载器)"""
-        logger.info(f"准备下载目录 for {version}-{loader.value}")
-
-        # 设置下载目录
-        version_dir = os.path.join(
-            self.config.output.download_dir,
-            f"{version}-{loader.value}",
-        )
-        os.makedirs(version_dir, exist_ok=True)
-        logger.success(f"目录设定成功: {version_dir}")
-
-        # 创建下载管理器
-        self.download_manager = DownloadManager(
+    def _create_download_manager(self) -> DownloadManager:
+        """创建下载管理器（子类可替换为事件感知实现）"""
+        return DownloadManager(
             max_concurrent=self.config.max_concurrent,
             max_retries=self.config.max_retries,
             retry_delay=self.config.retry_delay,
             progress_callback=self._on_download_progress,
         )
 
-        # 处理模组
-        await self._process_mods(version, loader, version_dir)
+    async def _before_download(self, target: BuildTarget) -> None:
+        """下载开始前钩子（子类可广播事件）"""
 
-        # 处理资源包
-        await self._process_entries(
-            self.config.minecraft.resourcepacks, "resourcepacks",
-            {"client": "required", "server": "optional"}, "资源包",
-            version, loader, version_dir,
-        )
+    async def _after_download(self, target: BuildTarget, stats) -> None:
+        """下载完成后钩子（子类可广播事件）"""
 
-        # 处理光影包
-        await self._process_entries(
-            self.config.minecraft.shaderpacks, "shaderpacks",
-            {"client": "required", "server": "optional"}, "光影包",
-            version, loader, version_dir,
-        )
+    async def _process_version(self, version: str, loader: ModLoader):
+        """处理单个 (版本, 加载器) 组合：入队 plan 制品并执行下载"""
+        target = self._find_target(version, loader)
+        logger.info(f"准备下载目录 for {target.dir_name}")
 
-        # 处理额外 URL
-        await self._process_extra_urls(version, version_dir)
+        version_dir = self._version_dir(target)
+        os.makedirs(version_dir, exist_ok=True)
+        logger.success(f"目录设定成功: {version_dir}")
+
+        self.download_manager = self._create_download_manager()
+
+        # 按 plan 入队下载任务
+        for artifact in self._plan.artifacts_for(target):
+            if artifact.origin == "catalog" and not self._needs_download:
+                logger.info(f"'{artifact.project_name}' 已记录引用 (跳过下载)")
+                continue
+            await self._enqueue_artifact(artifact, version_dir)
+
+        await self._before_download(target)
 
         # 执行下载
         logger.info(f"启动下载 ({self.config.max_concurrent}并发)...")
@@ -209,202 +227,68 @@ class ModFetchOrchestrator:
 
         stats = self.download_manager.get_stats()
         logger.success(
-            f"下载完成: {stats.completed} 成功, {stats.failed} 失败, {stats.skipped} 跳过"
+            f"下载完成: {stats.completed} 成功, {stats.failed} 失败, "
+            f"{stats.skipped} 跳过"
         )
 
-    async def _process_mods(self, version: str, loader: ModLoader, version_dir: str):
-        """处理模组"""
-        logger.info(f"开始处理 {len(self.config.minecraft.mods)} 个模组...")
+        await self._after_download(target, stats)
 
-        for mod in self.config.minecraft.mods:
-            if not self._should_include(mod, version):
-                logger.debug(f"模组 {mod} 被过滤，不适用于当前版本或功能")
-                continue
+        # 生成该 target 的输出
+        await self._generate_outputs_for_version(version, loader)
 
-            # Hook: 解析模组前
-            from modfetch.models import ModEntry
-
-            mod_entry = mod if isinstance(mod, ModEntry) else None
-            await self._execute_hook(
-                HookType.PRE_RESOLVE, version=version, mod_entry=mod_entry
-            )
-
-            # 解析模组
-            result = await self.resolver.resolve(mod, version, loader.value)
-
-            if not result:
-                self._skipped_mods.append(str(mod))
-                logger.warning(f"无法解析模组: {mod}")
-                continue
-
-            project_info, version_info, file_info = result
-
-            # Hook: 解析模组后
-            await self._execute_hook(
-                HookType.POST_RESOLVE,
-                version=version,
-                mod_entry=mod_entry,
-                extra_data={
-                    "project_info": project_info,
-                    "version_info": version_info,
-                    "file_info": file_info,
-                },
-            )
-
-            if project_info.id in self._processed_mods:
-                logger.debug(f"模组 {project_info.name} 已处理，跳过")
-                continue
-
-            self._processed_mods.add(project_info.id)
-            logger.info(f"正在分析模组 '{project_info.name}' (ID: {project_info.id})")
-
-            # 记录到 mrpack 文件列表
-            self._mrpack_files.append(
-                self._build_mrpack_entry("mods", file_info)
-            )
-
-            if self._needs_download:
-                await self._enqueue_download("mods", file_info, project_info.name, version_dir)
-            else:
-                logger.info(f"模组 '{project_info.name}' 已记录引用 (跳过下载)")
-
-            # 处理依赖
-            await self._process_dependencies(version_info, version, loader, version_dir)
-
-    async def _process_dependencies(
-        self, version_info, version: str, loader: ModLoader, version_dir: str
-    ):
-        """处理依赖"""
-        # Hook: 解析依赖前
-        await self._execute_hook(
-            HookType.PRE_RESOLVE_DEPENDENCIES,
-            version=version,
-            extra_data={"version_info": version_info},
+    async def _enqueue_artifact(
+        self, artifact: ResolvedArtifact, version_dir: str
+    ) -> None:
+        """将制品加入下载队列"""
+        download_dir = os.path.join(
+            version_dir, os.path.dirname(artifact.destination)
         )
-
-        deps = await self.dep_resolver.resolve(version_info, version, loader.value)
-
-        if deps:
-            logger.info(f"发现 {len(deps)} 个依赖需要处理")
-
-        # Hook: 解析依赖后
-        await self._execute_hook(
-            HookType.POST_RESOLVE_DEPENDENCIES,
-            version=version,
-            extra_data={"dependencies": deps},
+        await self.download_manager.enqueue(
+            url=artifact.url,
+            filename=artifact.filename,
+            download_dir=download_dir,
+            sha1=artifact.hashes.get("sha1"),
+            category=artifact.category.value,
         )
+        logger.success(f"'{artifact.project_name}' 已加入下载队列")
 
-        for dep_info, dep_version, dep_file in deps:
-            if dep_info.id in self._processed_mods:
-                continue
+    # -- 打包阶段 -----------------------------------------------------------
 
-            self._processed_mods.add(dep_info.id)
-            logger.info(f"添加依赖: {dep_info.name} (ID: {dep_info.id})")
+    def _mrpack_files_for(self, target: BuildTarget) -> List[dict]:
+        """REFERENCE 模式 manifest 文件列表（仅平台解析的制品）"""
+        assert self._plan is not None
+        return [
+            artifact.to_mrpack_entry()
+            for artifact in self._plan.artifacts_for(target)
+            if artifact.origin == "catalog"
+        ]
 
-            # 记录到 mrpack 文件列表
-            self._mrpack_files.append(
-                self._build_mrpack_entry("mods", dep_file)
-            )
-
-            if self._needs_download:
-                await self._enqueue_download("mods", dep_file, dep_info.name, version_dir)
-            else:
-                logger.debug(f"依赖 '{dep_info.name}' 已记录引用")
-
-    async def _process_entries(
-        self,
-        entries: list,
-        subdir: str,
-        env: dict[str, str],
-        label: str,
-        version: str,
-        loader: ModLoader,
-        version_dir: str,
-    ):
-        """处理资源包/光影包条目（参数化消除重复）
-
-        Args:
-            entries: 条目列表
-            subdir: 子目录名
-            env: mrpack 环境标记
-            label: 日志显示名（如 "资源包"）
-        """
-        if not entries:
-            return
-
-        logger.info(f"开始处理 {len(entries)} 个{label}...")
-
-        for entry in entries:
-            if not self._should_include(entry, version):
-                continue
-
-            result = await self.resolver.resolve(entry, version, loader.value)
-
-            if not result:
-                logger.warning(f"无法解析{label}: {entry}")
-                continue
-
-            project_info, version_info, file_info = result
-
-            self._mrpack_files.append(
-                self._build_mrpack_entry(subdir, file_info, env)
-            )
-
-            if self._needs_download:
-                await self._enqueue_download(subdir, file_info, project_info.name, version_dir)
-            else:
-                logger.info(f"{label} '{project_info.name}' 已记录引用")
-
-    async def _process_extra_urls(self, version: str, version_dir: str):
-        """处理额外 URL"""
-        if not self.config.minecraft.extra_urls:
-            return
-
-        logger.info(f"开始处理 {len(self.config.minecraft.extra_urls)} 个额外 URL...")
-
-        for extra in self.config.minecraft.extra_urls:
-            if not self._should_include(extra, version):
-                logger.debug(f"额外 URL {extra.url} 被过滤")
-                continue
-
-            # type=file 的文件直接放到版本根目录（overrides 根目录）
-            if extra.type == FileType.FILE:
-                download_dir = version_dir
-                category = "file"
-            else:
-                category = extra.type.value.replace("pack", "packs")
-                download_dir = os.path.join(version_dir, category)
-
-            # 从 URL 提取文件名时去掉尾部斜杠，避免空字符串
-            url_basename = extra.url.rstrip("/").split("/")[-1]
-
-            await self.download_manager.enqueue(
-                url=extra.url,
-                filename=extra.filename or url_basename,
-                download_dir=download_dir,
-                sha1=extra.sha1,
-                category=category,
-            )
-
-            # 记录目标路径，用于 REFERENCE 模式下仍包含 extra_urls 文件到 overrides
-            dest_path = os.path.join(
-                download_dir, extra.filename or url_basename
-            )
-            self._extra_urls_destinations.append(dest_path)
-            logger.success(f"额外 URL '{extra.filename}' 已加入下载队列")
+    def _extra_url_destinations(self, target: BuildTarget) -> List[str]:
+        """extra_urls 的目标路径（REFERENCE 模式下仍纳入 overrides）"""
+        assert self._plan is not None
+        version_dir = self._version_dir(target)
+        return [
+            os.path.join(version_dir, artifact.destination)
+            for artifact in self._plan.artifacts_for(target)
+            if artifact.origin == "extra_url"
+        ]
 
     async def _generate_outputs_for_version(self, version: str, loader: ModLoader):
         """为特定版本和加载器生成输出文件"""
-        output_formats = self.config.output.format
+        assert self._plan is not None
+        target = self._find_target(version, loader)
+        for spec in self._plan.outputs_for(target):
+            if spec.format == "mrpack":
+                await self._generate_mrpack(target, spec)
+            elif spec.format == "zip":
+                await self._generate_zip(target, spec)
 
-        if OutputFormat.MRPACK in output_formats:
-            await self._generate_mrpack_for_version(version, loader)
+    async def _generate_mrpack(self, target: BuildTarget, spec: OutputSpec):
+        """生成 mrpack 文件"""
+        version = target.minecraft_version
+        loader = target.loader
+        mode = MrpackMode(spec.mrpack_mode)
 
-        if OutputFormat.ZIP in output_formats:
-            await self._generate_zip_for_version(version, loader)
-
-    async def _generate_mrpack_for_version(self, version: str, loader: ModLoader):
-        """为特定版本和加载器生成 mrpack 文件"""
         # Hook: 打包前
         await self._execute_hook(HookType.PRE_PACKAGE, version=version)
 
@@ -414,89 +298,86 @@ class ModFetchOrchestrator:
             "description": self.config.metadata.description,
         }
 
-        source_dir = os.path.join(
-            self.config.output.download_dir,
-            f"{version}-{loader.value}",
-        )
-
-        # 确保目录存在
+        source_dir = self._version_dir(target)
         os.makedirs(source_dir, exist_ok=True)
 
-        loader_version = await self.version_matcher.get_loader_version(loader, version)
-
-        for mode in self.config.output.mrpack_modes:
-            logger.info(
-                f"正在生成 Minecraft {version} ({loader.value}) 的 mrpack ({mode.value} 模式)..."
-            )
-
-            suffix = (
-                f"-{mode.value}" if len(self.config.output.mrpack_modes) > 1 else ""
-            )
-            output_name = f"{metadata['name']}_{metadata['version']}_MC{version}-{loader.value}{suffix}"
-            output_path = os.path.join(self.config.output.download_dir, output_name)
-
-            # 在 REFERENCE 模式下，source_dir 内容不应进入 overrides
-            # 但 extra_urls 的本地文件仍需要进入 overrides
-            if mode == MrpackMode.DOWNLOAD:
-                actual_source = source_dir
-            else:
-                # REFERENCE 模式：默认使用空目录
-                actual_source = os.path.join(source_dir, "non_existent_empty_dir")
-                os.makedirs(actual_source, exist_ok=True)
-
-                # 如果有 extra_urls 文件，创建临时目录将其纳入 overrides
-                if self._extra_urls_destinations:
-                    extra_source = tempfile.mkdtemp(
-                        prefix="modfetch_extra_overrides_"
-                    )
-                    for dest in self._extra_urls_destinations:
-                        if os.path.exists(dest):
-                            rel_path = os.path.relpath(dest, source_dir)
-                            override_dest = os.path.join(extra_source, rel_path)
-                            if os.path.isdir(dest):
-                                shutil.copytree(
-                                    dest, override_dest, dirs_exist_ok=True
-                                )
-                            else:
-                                os.makedirs(
-                                    os.path.dirname(override_dest), exist_ok=True
-                                )
-                                shutil.copy2(dest, override_dest)
-                    actual_source = extra_source
-
-            try:
-                mrpack_path = await self.mrpack_builder.build(
-                    source_dir=actual_source,
-                    output_path=output_path,
-                    metadata=metadata,
-                    mc_version=version,
-                    mod_loader=loader,
-                    loader_version=loader_version,
-                    files=self._mrpack_files if mode == MrpackMode.REFERENCE else None,
-                )
-                logger.success(f"mrpack ({mode.value}) 生成成功: {mrpack_path}")
-
-                # Hook: 打包后
-                await self._execute_hook(
-                    HookType.POST_PACKAGE,
-                    version=version,
-                    extra_data={"output_path": mrpack_path, "format": "mrpack"},
-                )
-            except Exception as e:
-                logger.error(f"mrpack ({mode.value}) 生成失败: {e}")
-            finally:
-                if mode == MrpackMode.REFERENCE and os.path.exists(actual_source):
-                    shutil.rmtree(actual_source)
-
-    async def _generate_zip_for_version(self, version: str, loader: ModLoader):
-        """为特定版本和加载器生成 ZIP 文件"""
-        logger.info(f"开始生成 Minecraft {version} ({loader.value}) 的 ZIP 归档...")
-
-        source_dir = os.path.join(
-            self.config.output.download_dir,
-            f"{version}-{loader.value}",
+        loader_version = await self.version_matcher.get_loader_version(
+            loader, version
         )
 
+        logger.info(
+            f"正在生成 Minecraft {version} ({loader.value}) 的 "
+            f"mrpack ({mode.value} 模式)..."
+        )
+        output_path = os.path.join(
+            self.config.output.download_dir, spec.output_name
+        )
+
+        # 在 REFERENCE 模式下，source_dir 内容不应进入 overrides
+        # 但 extra_urls 的本地文件仍需要进入 overrides
+        if mode == MrpackMode.DOWNLOAD:
+            actual_source = source_dir
+        else:
+            actual_source = os.path.join(source_dir, "non_existent_empty_dir")
+            os.makedirs(actual_source, exist_ok=True)
+
+            destinations = self._extra_url_destinations(target)
+            if destinations:
+                extra_source = tempfile.mkdtemp(
+                    prefix="modfetch_extra_overrides_"
+                )
+                for dest in destinations:
+                    if os.path.exists(dest):
+                        rel_path = os.path.relpath(dest, source_dir)
+                        override_dest = os.path.join(extra_source, rel_path)
+                        if os.path.isdir(dest):
+                            shutil.copytree(
+                                dest, override_dest, dirs_exist_ok=True
+                            )
+                        else:
+                            os.makedirs(
+                                os.path.dirname(override_dest) or extra_source,
+                                exist_ok=True,
+                            )
+                            shutil.copy2(dest, override_dest)
+                actual_source = extra_source
+
+        try:
+            mrpack_path = await self.mrpack_builder.build(
+                source_dir=actual_source,
+                output_path=output_path,
+                metadata=metadata,
+                mc_version=version,
+                mod_loader=loader,
+                loader_version=loader_version,
+                files=(
+                    self._mrpack_files_for(target)
+                    if mode == MrpackMode.REFERENCE
+                    else None
+                ),
+            )
+            logger.success(f"mrpack ({mode.value}) 生成成功: {mrpack_path}")
+
+            # Hook: 打包后
+            await self._execute_hook(
+                HookType.POST_PACKAGE,
+                version=version,
+                extra_data={"output_path": mrpack_path, "format": "mrpack"},
+            )
+        except Exception as e:
+            logger.error(f"mrpack ({mode.value}) 生成失败: {e}")
+        finally:
+            if mode == MrpackMode.REFERENCE and os.path.exists(actual_source):
+                shutil.rmtree(actual_source)
+
+    async def _generate_zip(self, target: BuildTarget, spec: OutputSpec):
+        """生成 ZIP 文件"""
+        version = target.minecraft_version
+        logger.info(
+            f"开始生成 Minecraft {version} ({target.loader.value}) 的 ZIP 归档..."
+        )
+
+        source_dir = self._version_dir(target)
         if not os.path.exists(source_dir):
             logger.warning(f"源目录不存在: {source_dir}")
             return
@@ -505,7 +386,7 @@ class ModFetchOrchestrator:
             zip_path = await self.zip_builder.build(
                 source_dir=source_dir,
                 output_path=self.config.output.download_dir,
-                archive_name=f"archive-{version}-{loader.value}",
+                archive_name=spec.output_name,
             )
             logger.success(f"ZIP 生成成功: {zip_path}")
 
@@ -518,14 +399,15 @@ class ModFetchOrchestrator:
         except Exception as e:
             logger.error(f"ZIP 生成失败: {e}")
 
-    def _should_include(self, entry, version: str) -> bool:
-        """检查是否应该包含该项"""
-        features = self.config.features
-        return self.version_matcher.should_include(entry, version, features)
+    # -- 统计 ----------------------------------------------------------------
 
     def get_stats(self) -> dict:
-        """获取统计信息"""
+        """获取统计信息（保持旧语义: 最后一个 target 的处理/跳过）"""
+        if self._last_target is None:
+            return {"processed_mods": 0, "skipped": []}
         return {
-            "processed_mods": len(self._processed_mods),
-            "skipped": self._skipped_mods,
+            "processed_mods": len(
+                self._processed_by_target.get(self._last_target, set())
+            ),
+            "skipped": self._skipped_by_target.get(self._last_target, []),
         }

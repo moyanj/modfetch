@@ -162,29 +162,11 @@ class ServerOrchestrator(ModFetchOrchestrator):
                 },
             )
 
-    # -- 覆写 _process_version 以使用 EventDownloadManager ----------------
+    # -- 下载器/事件接缝（组合式覆写，不再复制父类流程） --------------------
 
-    async def _process_version(self, version: str, loader: ModLoader) -> None:
-        """
-        覆写父类方法，使用 EventDownloadManager 并广播 phase_change 事件。
-
-        逻辑与父类一致，仅替换 DownloadManager 并添加事件广播。
-        """
-        logger.info(f"准备下载目录 for {version}-{loader.value}")
-
-        # 通知 JobContext 当前版本/加载器
-        if self._on_version_loader:
-            self._on_version_loader(version, loader.value)
-
-        version_dir = os.path.join(
-            self.config.output.download_dir,
-            f"{version}-{loader.value}",
-        )
-        os.makedirs(version_dir, exist_ok=True)
-        logger.success(f"目录设定成功: {version_dir}")
-
-        # 使用 EventDownloadManager 替代标准 DownloadManager
-        self.download_manager = EventDownloadManager(
+    def _create_download_manager(self) -> EventDownloadManager:
+        """使用 EventDownloadManager 替代标准 DownloadManager"""
+        return EventDownloadManager(
             max_concurrent=self.config.max_concurrent,
             max_retries=self.config.max_retries,
             retry_delay=self.config.retry_delay,
@@ -192,34 +174,21 @@ class ServerOrchestrator(ModFetchOrchestrator):
             download_event_callback=self._on_download_event,
         )
 
-        await self._process_mods(version, loader, version_dir)
-        await self._process_entries(
-            self.config.minecraft.resourcepacks, "resourcepacks",
-            {"client": "required", "server": "optional"}, "资源包",
-            version, loader, version_dir,
-        )
-        await self._process_entries(
-            self.config.minecraft.shaderpacks, "shaderpacks",
-            {"client": "required", "server": "optional"}, "光影包",
-            version, loader, version_dir,
-        )
-        await self._process_extra_urls(version, version_dir)
+    async def _process_version(self, version: str, loader: ModLoader) -> None:
+        """通知当前版本/加载器后委托父类流程"""
+        if self._on_version_loader:
+            self._on_version_loader(version, loader.value)
+        await super()._process_version(version, loader)
 
-        # 广播 phase_change → download
+    async def _before_download(self, target) -> None:
+        """广播 phase_change → download"""
         if self._broadcaster:
             await self._broadcaster(
                 {"event": "phase_change", "data": {"phase": "download"}}
             )
 
-        logger.info(f"启动下载 ({self.config.max_concurrent}并发)...")
-        await self.download_manager.run()
-
-        stats = self.download_manager.get_stats()
-        logger.success(
-            f"下载完成: {stats.completed} 成功, {stats.failed} 失败, {stats.skipped} 跳过"
-        )
-
-        # 广播 stats_update
+    async def _after_download(self, target, stats) -> None:
+        """广播 stats_update"""
         if self._broadcaster:
             await self._broadcaster(
                 {
