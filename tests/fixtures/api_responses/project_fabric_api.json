@@ -1,0 +1,8 @@
+{
+  "id": "BBBB0002",
+  "slug": "fabric-api",
+  "title": "Fabric API",
+  "description": "Core hooks for Fabric mods",
+  "project_type": "mod",
+  "versions": ["v0.100.0"]
+}

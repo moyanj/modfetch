@@ -1,0 +1,13 @@
+# 多版本 x 多加载器配置
+[minecraft]
+version = ["1.21.1", "1.20.4"]
+mod_loader = ["fabric", "forge"]
+mods = ["sodium"]
+
+[output]
+download_dir = "downloads"
+format = ["mrpack"]
+
+[metadata]
+name = "TestPack"
+version = "1.0.0"

@@ -1,0 +1,15 @@
+{
+  "hits": [
+    {
+      "project_id": "AAAA0001",
+      "slug": "sodium",
+      "title": "Sodium",
+      "description": "A modern rendering engine for Minecraft",
+      "project_type": "mod",
+      "downloads": 30000000
+    }
+  ],
+  "offset": 0,
+  "limit": 5,
+  "total_hits": 1
+}

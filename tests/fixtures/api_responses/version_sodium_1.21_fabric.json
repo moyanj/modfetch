@@ -1,0 +1,19 @@
+{
+  "id": "v0.6.0",
+  "name": "Sodium 0.6.0",
+  "version_number": "0.6.0",
+  "loaders": ["fabric"],
+  "game_versions": ["1.21.1"],
+  "dependencies": [
+    { "project_id": "BBBB0002", "dependency_type": "required" }
+  ],
+  "files": [
+    {
+      "url": "https://cdn.modrinth.com/data/AAAA0001/versions/v0.6.0/sodium-fabric-0.6.0.jar",
+      "filename": "sodium-fabric-0.6.0.jar",
+      "size": 0,
+      "primary": true,
+      "hashes": { "sha1": "", "sha512": "" }
+    }
+  ]
+}

@@ -31,4 +31,12 @@ include-package-data = true
 license-files = []
 
 [dependency-groups]
-dev = ["nuitka>=2.7.12"]
+dev = [
+    "nuitka>=2.7.12",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -1,0 +1,14 @@
+# 含 extra_urls 的配置
+[minecraft]
+version = ["1.21.1"]
+mod_loader = "fabric"
+mods = ["sodium"]
+extra_urls = [
+    { url = "file:///tmp/modfetch-fixtures/datapack.zip", type = "file", sha1 = "deadbeef" },
+    { url = "https://example.com/packs/cool-pack.zip", type = "resourcepack", only_version = "1.21.1" },
+    { url = "https://example.com/shaders/s.seus.zip", type = "shaderpack", filename = "seus.zip", feature = "shaders" },
+]
+
+[output]
+download_dir = "downloads"
+format = ["mrpack"]

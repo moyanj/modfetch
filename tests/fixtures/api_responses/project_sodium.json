@@ -1,0 +1,8 @@
+{
+  "id": "AAAA0001",
+  "slug": "sodium",
+  "title": "Sodium",
+  "description": "A modern rendering engine for Minecraft",
+  "project_type": "mod",
+  "versions": ["v0.6.0", "v0.5.8"]
+}

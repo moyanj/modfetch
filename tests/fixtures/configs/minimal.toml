@@ -1,0 +1,13 @@
+# 最小配置: 1 mod, 1 version, 1 loader
+[minecraft]
+version = ["1.21.1"]
+mod_loader = "fabric"
+mods = ["sodium"]
+
+[output]
+download_dir = "downloads"
+format = ["mrpack"]
+
+[metadata]
+name = "TestPack"
+version = "1.0.0"
