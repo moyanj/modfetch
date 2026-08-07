@@ -91,6 +91,8 @@ resourcepacks = [
 shaderpacks = [
     "complementary-reimagined",
 ]
+# ⚠️ 配置光影包时，mods 中必须包含光影加载器之一:
+#    iris / oculus / optifine (oculus 与 iris 等价)，否则本地校验会拒绝构建。
 
 # 额外下载链接
 extra_urls = [
@@ -143,24 +145,20 @@ ModFetch 支持 Python 和 Lua 两种插件语言。
 
 ### 使用内置插件
 
-```bash
-# 显示下载进度
-modfetch mods.toml --plugin progress
+内置插件（`progress` / `notify` / `filter`）通过配置声明启用：
 
-# 完成后发送通知
-modfetch mods.toml --plugin notify
-
-# 使用多个插件
-modfetch mods.toml --plugin progress --plugin notify
+```toml
+[plugins]
+enabled = ["progress", "notify"]
 ```
 
-### 从文件加载插件
+或通过 `--plugin` 从文件加载任意插件：
 
 ```bash
-# Python 插件
+# 从文件加载 Python 插件
 modfetch mods.toml --plugin ./my_plugin.py
 
-# Lua 插件
+# 从文件加载 Lua 插件
 modfetch mods.toml --plugin ./my_plugin.lua
 ```
 
@@ -265,7 +263,8 @@ modfetch/
 ```
 
 > 旧导入路径（`modfetch.models` / `modfetch.exceptions` / `modfetch.services` /
-> `modfetch.download`）通过 shim 保持可用，已弃用，将随主版本移除。
+> `modfetch.download`）已随 hexagonal 重构删除，统一迁移到
+> `domain` / `application` / `adapters` 分层。
 
 ## 🤝 贡献
 

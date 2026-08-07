@@ -23,6 +23,14 @@ class BuildTarget:
         """下载目录名（沿用旧命名约定: {version}-{loader}）"""
         return f"{self.minecraft_version}-{self.loader.value}"
 
+    def to_dict(self) -> dict:
+        """序列化为纯 dict（枚举转 value，可 JSON 序列化）"""
+        return {
+            "minecraft_version": self.minecraft_version,
+            "loader": self.loader.value,
+            "dir_name": self.dir_name,
+        }
+
 
 @dataclass(frozen=True)
 class ArtifactCategory:
@@ -49,6 +57,10 @@ class ArtifactCategory:
     def file(cls) -> "ArtifactCategory":
         """普通文件类别（不归入 mods/resourcepacks 子目录）"""
         return cls("file")
+
+    def to_dict(self) -> str:
+        """序列化为纯值（类别本质是字符串包装）"""
+        return self.value
 
 
 @dataclass(frozen=True)
@@ -84,6 +96,23 @@ class ResolvedArtifact:
             "fileSize": self.size,
         }
 
+    def to_dict(self) -> dict:
+        """序列化为纯 dict（可 JSON 序列化）"""
+        return {
+            "project_id": self.project_id,
+            "project_name": self.project_name,
+            "category": self.category.to_dict(),
+            "filename": self.filename,
+            "url": self.url,
+            "hashes": self.hashes,
+            "destination": self.destination,
+            "target": self.target.to_dict(),
+            "size": self.size,
+            "origin": self.origin,
+            "environment": self.environment,
+            "mrpack_entry": self.to_mrpack_entry(),
+        }
+
 
 @dataclass(frozen=True)
 class OutputSpec:
@@ -93,6 +122,15 @@ class OutputSpec:
     target: BuildTarget  #: 目标构建目标
     output_name: str  #: 最终文件名（不含扩展名）
     mrpack_mode: str = "download"  #: 仅 mrpack 有效："download" / "reference"
+
+    def to_dict(self) -> dict:
+        """序列化为纯 dict（可 JSON 序列化）"""
+        return {
+            "format": self.format,
+            "target": self.target.to_dict(),
+            "output_name": self.output_name,
+            "mrpack_mode": self.mrpack_mode,
+        }
 
 
 @dataclass(frozen=True)
@@ -111,6 +149,39 @@ class BuildPlan:
     def outputs_for(self, target: BuildTarget) -> Tuple[OutputSpec, ...]:
         """返回属于指定 target 的输出规格"""
         return tuple(o for o in self.outputs if o.target == target)
+
+    def to_dict(self) -> dict:
+        """序列化为纯 dict（递归转枚举、嵌套对象，可直接 json.dumps）"""
+        return {
+            "targets": [t.to_dict() for t in self.targets],
+            "artifacts": [a.to_dict() for a in self.artifacts],
+            "outputs": [o.to_dict() for o in self.outputs],
+            "metadata": self.metadata,
+        }
+
+    def to_json(self) -> str:
+        """返回 JSON 字符串（供日志/API/持久化消费）"""
+        import json
+
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+
+    def to_file(self, path) -> str:
+        """将计划序列化为 JSON 并写入指定文件
+
+        Args:
+            path: 目标文件路径（str 或 Path）；父目录不存在时自动创建
+
+        Returns:
+            写入的绝对路径字符串
+
+        供 CLI（--plan-out）、Web 或外部工具持久化构建计划使用。
+        """
+        from pathlib import Path
+
+        target = Path(path).expanduser().resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(self.to_json(), encoding="utf-8")
+        return str(target)
 
 
 @dataclass(frozen=True)

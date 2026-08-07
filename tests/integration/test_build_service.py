@@ -126,3 +126,102 @@ class TestBuildService:
             paths = {f["path"] for f in manifest["files"]}
             assert "mods/sodium-fabric-0.6.0.jar" in paths
             assert "mods/fabric-api-0.100.0.jar" in paths
+
+    def _make_extra_files(self, tmp_path: Path):
+        """创建两个本地 file:// 文件（file 类型 + shaderpack 类型）"""
+        datafile = tmp_path / "custom.json"
+        datafile.write_text('{"custom": true}', encoding="utf-8")
+        shaderfile = tmp_path / "seus.zip"
+        shaderfile.write_bytes(b"PK\x03\x04 shader content")
+        return datafile, shaderfile
+
+    async def test_extra_url_injected_download_mode(
+        self, make_config_dict, tmp_path
+    ):
+        """DOWNLOAD 模式: extra_url 文件下载并注入 mrpack overrides"""
+        datafile, _ = self._make_extra_files(tmp_path)
+        sink = CollectingSink()
+        result, download_dir = await _run(
+            make_config_dict(
+                minecraft={
+                    "extra_urls": [
+                        {
+                            "url": datafile.as_uri(),
+                            "type": "file",
+                            "filename": "custom.json",
+                        }
+                    ]
+                }
+            ),
+            sink,
+        )
+
+        assert result.success
+        # extra_url 文件计入下载统计
+        assert result.stats.downloaded == 3  # sodium + fabric-api + custom.json
+        mrpack = download_dir / "TestPack_1.0.0_MC1.21.1-fabric.mrpack"
+        with zipfile.ZipFile(mrpack) as zf:
+            # file 类型 → overrides 根目录
+            assert "overrides/custom.json" in zf.namelist()
+            content = zf.read("overrides/custom.json")
+            assert json.loads(content) == {"custom": True}
+
+    async def test_extra_url_injected_reference_mode(
+        self, make_config_dict, tmp_path
+    ):
+        """REFERENCE 模式: extra_url 进入 overrides, catalog 制品仅引用"""
+        _, shaderfile = self._make_extra_files(tmp_path)
+        sink = CollectingSink()
+        result, download_dir = await _run(
+            make_config_dict(
+                output={"mrpack_modes": ["reference"]},
+                minecraft={
+                    "extra_urls": [
+                        {
+                            "url": shaderfile.as_uri(),
+                            "type": "shaderpack",
+                            "filename": "seus.zip",
+                        }
+                    ]
+                },
+            ),
+            sink,
+        )
+
+        assert result.success
+        mrpack = download_dir / "TestPack_1.0.0_MC1.21.1-fabric.mrpack"
+        with zipfile.ZipFile(mrpack) as zf:
+            manifest = json.loads(zf.read("modrinth.index.json"))
+            # catalog 制品写入 manifest.files（引用模式）
+            assert any(
+                f["path"].startswith("mods/") for f in manifest["files"]
+            )
+            # shaderpack 类型 extra → overrides/shaderpacks/
+            entries = zf.namelist()
+            assert "overrides/shaderpacks/seus.zip" in entries
+
+    async def test_extra_url_shaderpack_destination_subdir(
+        self, make_config_dict, tmp_path
+    ):
+        """shaderpack 类型 extra_url 落入 overrides/shaderpacks/ 子目录"""
+        _, shaderfile = self._make_extra_files(tmp_path)
+        sink = CollectingSink()
+        result, download_dir = await _run(
+            make_config_dict(
+                minecraft={
+                    "extra_urls": [
+                        {
+                            "url": shaderfile.as_uri(),
+                            "type": "shaderpack",
+                            "filename": "seus.zip",
+                        }
+                    ]
+                }
+            ),
+            sink,
+        )
+
+        assert result.success
+        mrpack = download_dir / "TestPack_1.0.0_MC1.21.1-fabric.mrpack"
+        with zipfile.ZipFile(mrpack) as zf:
+            assert "overrides/shaderpacks/seus.zip" in zf.namelist()

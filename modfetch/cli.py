@@ -22,6 +22,7 @@ from modfetch.composition import create_build_service
 from modfetch.domain.errors import ModFetchError, PluginError
 from modfetch.logger import setup_logger
 from modfetch.plugins.lua_loader import LuaPluginLoader
+from modfetch.plugins import PluginManager, PluginLoader
 
 
 def load_config(config_path: str) -> dict:
@@ -44,6 +45,56 @@ def _is_lua_plugin(path: str) -> bool:
     return Path(target).suffix == ".lua"
 
 
+async def load_plugins(
+    plugin_manager,
+    plugin_loader,
+    lua_plugin_manager,
+    plugins: list[str],
+    plugin_dir: Optional[str],
+):
+    """加载全部插件（目录扫描 + 显式指定），按语言分发
+
+    职责:
+        - 扫描 plugin_dir，将 .py / .lua 文件按后缀分发到对应 loader 加载
+        - 加载显式传入的 plugins（本地文件或 URL，按后缀分发）
+        - 目录加载失败降级 warning；显式 --plugin 失败记录 error（不中断）
+
+    参数:
+        plugin_manager: 插件管理器（已初始化）
+        plugin_loader: Python 插件加载器（负责 .py）
+        lua_plugin_manager: Lua 插件加载器（负责 .lua）
+        plugins: 显式指定的插件路径（--plugin，可多次）
+        plugin_dir: 插件目录，递归扫描其中的 .py 与 .lua 文件
+    """
+    # 扫描插件目录：合并两类 loader 各自扫描到的 .py / .lua 文件，
+    # 再按后缀分发到对应 loader 加载
+    if plugin_dir:
+        plugin_paths = plugin_loader.scan_directory(
+            plugin_dir
+        ) + lua_plugin_manager.scan_directory(plugin_dir)
+        for path in plugin_paths:
+            try:
+                if path.endswith(".lua"):
+                    await lua_plugin_manager.load_from_path(path)
+                elif path.endswith(".py"):
+                    await plugin_loader.load_from_path(path)
+                else:
+                    # 两个 scan_directory 只会返回 .py/.lua，此分支为防御兜底
+                    raise PluginError("WTF？内存损坏？这是不可能被扫描的")
+            except Exception as e:
+                logger.warning(f"加载插件 {path} 失败: {e}")
+
+    # 加载指定插件（按语言分发: .lua → Lua loader，其余 → Python loader）
+    for plugin_path in plugins:
+        try:
+            if _is_lua_plugin(plugin_path):
+                await lua_plugin_manager.load_from_path(plugin_path)
+            else:
+                await plugin_loader.load_from_path(plugin_path)
+        except Exception as e:
+            logger.error(f"加载插件 {plugin_path} 失败: {e}")
+
+
 async def run_async(
     config_path: str,
     features: list[str],
@@ -51,6 +102,8 @@ async def run_async(
     plugin_dir: Optional[str],
     list_plugins: bool,
     dry_run: bool = False,
+    plan: bool = False,
+    plan_out: Optional[str] = None,
 ):
     """运行 CLI 主流程（插件加载 + 配置校验 + 构建）
 
@@ -66,7 +119,6 @@ async def run_async(
         初始化插件系统（Python + Lua 双 loader）→ 加载插件 → 加载并校验配置
         → （可选）干运行输出概要 → 通过 BuildApplicationService 执行构建。
     """
-    from modfetch.plugins import PluginManager, PluginLoader
 
     # 初始化插件系统：Python loader 负责 .py，Lua loader 负责 .lua
     plugin_manager = PluginManager()
@@ -75,33 +127,10 @@ async def run_async(
     await lua_plugin_manager.initialize()
 
     try:
-        # 扫描插件目录：合并两类 loader 各自扫描到的 .py / .lua 文件，
-        # 再按后缀分发到对应 loader 加载
-        if plugin_dir:
-            plugin_paths = plugin_loader.scan_directory(
-                plugin_dir
-            ) + lua_plugin_manager.scan_directory(plugin_dir)
-            for path in plugin_paths:
-                try:
-                    if path.endswith(".lua"):
-                        await lua_plugin_manager.load_from_path(path)
-                    elif path.endswith(".py"):
-                        await plugin_loader.load_from_path(path)
-                    else:
-                        # 两个 scan_directory 只会返回 .py/.lua，此分支为防御兜底
-                        raise PluginError("WTF？内存损坏？这是不可能被扫描的")
-                except Exception as e:
-                    logger.warning(f"加载插件 {path} 失败: {e}")
-
-        # 加载指定插件（按语言分发: .lua → Lua loader，其余 → Python loader）
-        for plugin_path in plugins:
-            try:
-                if _is_lua_plugin(plugin_path):
-                    await lua_plugin_manager.load_from_path(plugin_path)
-                else:
-                    await plugin_loader.load_from_path(plugin_path)
-            except Exception as e:
-                logger.error(f"加载插件 {plugin_path} 失败: {e}")
+        # 加载插件（目录扫描 + 显式 --plugin，按语言分发）
+        await load_plugins(
+            plugin_manager, plugin_loader, lua_plugin_manager, plugins, plugin_dir
+        )
 
         # 列出插件
         if list_plugins:
@@ -168,6 +197,14 @@ async def run_async(
                 verify_ssl=config.verify_ssl,
             )
             try:
+                if plan:
+                    result = await service.plan(config, job_id="cli")
+                    if plan_out:
+                        with open(plan_out, "w") as f:
+                            f.write(result.to_json())
+                    else:
+                        click.echo(result.to_json())
+                    return
                 result = await service.execute(config, job_id="cli")
             finally:
                 # 释放 aiohttp session（catalog/downloader），避免连接池泄漏
@@ -202,6 +239,8 @@ async def run_async(
 @click.option("--list-plugins", is_flag=True, help="列出已加载的插件")
 @click.option("--dry-run", is_flag=True, help="干运行模式（只验证配置）")
 @click.option("--debug", is_flag=True, help="启用调试模式")
+@click.option("--plan", is_flag=True, help="仅生成构建计划")
+@click.option("--plan-out", help="构建计划输出路径")
 @click.version_option(version="0.1.0")
 def main(
     config: str,
@@ -211,6 +250,8 @@ def main(
     list_plugins: bool,
     dry_run: bool,
     debug: bool,
+    plan: bool,
+    plan_out: str,
 ):
     """ModFetch - Minecraft 模组下载管理工具
 
@@ -226,7 +267,16 @@ def main(
     features = list(feature)
     plugin_list = list(plugins)
     asyncio.run(
-        run_async(config, features, plugin_list, plugin_dir, list_plugins, dry_run)
+        run_async(
+            config,
+            features,
+            plugin_list,
+            plugin_dir,
+            list_plugins,
+            dry_run,
+            plan,
+            plan_out,
+        )
     )
 
 

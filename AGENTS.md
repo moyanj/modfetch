@@ -90,4 +90,5 @@ uv run nuitka_build.py   # Nuitka → modfetch.bin（CI 同款；不是 python b
 - 构建产物 / 下载走 `./downloads/`（gitignored）；Nuitka 产出各平台 `modfetch.bin`
 - `post.py` 是根级独立插件（非包代码，经 `--plugin ./post.py` 加载）
 - `uv.lock` 不提交 → CI 每次 `uv sync` 重新解析，构建非确定性（待评估是否纳入版本控制）
-- README 仍描述已删除的 shim 模块，文档待同步
+- 文档入口：`docs.md`（配置格式规范，含条件编译/光影加载器约束）与 `README.md`（用户指南）
+- 配置格式实际支持 toml/yaml/json（`ParentConfig.format` 校验仍列出 xml，但解析器未实现，文档按实际能力编写）
