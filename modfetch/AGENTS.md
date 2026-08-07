@@ -2,33 +2,45 @@
 
 Core Python package for Minecraft mod downloading and modpack creation.
 
+Hexagonal architecture: `domain` (pure models) ← `ports` (Protocols) ←
+`application` (use cases) ← `adapters` (implementations). CLI and FastAPI
+server are thin adapters over `BuildApplicationService`.
+
 ## STRUCTURE
 ```
 modfetch/
-├── cli.py          # Click CLI entry
-├── orchestrator.py # Main orchestration logic
-├── api/            # Modrinth API wrappers
-├── download/       # Async file download
-├── models/         # Pydantic data models
-├── services/       # API client, resolvers
-├── packager/       # Modpack .zip creation
-└── plugins/        # Plugin hooks (empty)
+├── domain/         # Pure domain models (NO aiohttp/fastapi/click/loguru)
+├── ports/          # Dependency interfaces (Protocol)
+├── application/    # Use cases: build_service / plan_build / execute_build
+├── adapters/       # modrinth/ download/ packaging/ events/ config/ jobs/
+├── services/       # Legacy resolvers (ModResolver/VersionMatcher/MrpackResolver)
+├── plugins/        # Plugin hooks (Python/Lua)
+├── server/         # FastAPI thin adapter (routes/ws/schemas)
+├── models/         # COMPAT SHIM → domain
+├── download/       # COMPAT SHIM → adapters/download
+├── exceptions.py   # COMPAT SHIM → domain.errors
+├── composition.py  # DI composition root (create_build_service)
+└── cli.py          # CLI adapter
 ```
 
 ## WHERE TO LOOK
 | Task | Location |
 |------|----------|
-| CLI args | `cli.py` |
-| Download flow | `download/__init__.py` |
-| API client | `services/api_client.py` |
-| Resolver logic | `services/dependency_resolver.py` |
+| Build orchestration | `application/build_service.py` |
+| Plan generation | `application/plan_build.py` |
+| Config boundary | `application/config_service.py` |
+| Modrinth HTTP | `adapters/modrinth/client.py` |
+| Download execution | `adapters/download/executor.py` |
+| DI wiring | `composition.py` |
 
 ## CONVENTIONS
-- Async throughout (`aiohttp`, `aiofiles`)
+- Async throughout (`aiohttp`, `aiofiles`) — in adapters only
 - Logging via `loguru`
-- Exceptions in `exceptions.py`
+- Errors flow as values (`DownloadResult`/`BuildResult.errors`), never swallowed
+- `domain/` purity enforced by AST check (no infra imports)
 - Entry: `modfetch/__main__:cli_main`
 
 ## ANTI-PATTERNS
-- No type hints in some modules
 - No ruff linting configured
+- Compat shims (`modfetch.models` etc.) are deprecated — import from
+  `modfetch.domain` / `modfetch.adapters` in new code

@@ -231,20 +231,41 @@ modfetch [OPTIONS] CONFIG
 
 ## 📁 项目结构
 
+分层架构（domain → ports → application → adapters），CLI 与 Web 均为薄适配层，
+统一走 `BuildApplicationService`：
+
 ```
 modfetch/
-├── modfetch/           # Python 后端
-│   ├── cli.py         # 命令行接口
-│   ├── orchestrator.py # 核心协调逻辑
-│   ├── api/           # Modrinth API 封装
-│   ├── download/      # 异步下载管理
-│   ├── models/        # 数据模型
-│   ├── services/      # 解析器服务
-│   ├── packager/      # 打包器
-│   └── plugins/       # 插件系统
-├── examples/          # 示例配置和插件
+├── modfetch/
+│   ├── domain/        # 纯领域模型（零基础设施依赖）
+│   │   ├── models.py         # ProjectInfo/VersionInfo 等
+│   │   ├── config_models.py  # 配置数据类
+│   │   ├── build_plan.py     # BuildPlan/BuildResult 等值对象
+│   │   ├── events.py         # 统一构建事件协议
+│   │   └── errors.py         # 错误体系
+│   ├── ports/         # 外部依赖接口（Protocol）
+│   ├── application/   # 用例编排
+│   │   ├── build_service.py  # BuildApplicationService（统一入口）
+│   │   ├── plan_build.py     # PlanBuild 用例
+│   │   ├── execute_build.py  # ExecuteBuild 用例
+│   │   └── config_service.py # 统一配置边界
+│   ├── adapters/      # 接口实现
+│   │   ├── modrinth/  # Modrinth API（CatalogPort）
+│   │   ├── download/  # 下载器/存储/重试/执行器
+│   │   ├── packaging/ # mrpack/zip 打包器
+│   │   ├── events/    # 事件接收器（日志/作业/复合）
+│   │   ├── config/    # TOML/YAML/JSON 配置来源 + 继承
+│   │   └── jobs/      # Web 作业管理
+│   ├── plugins/       # 插件系统（Python/Lua）
+│   ├── server/        # Web 适配层（FastAPI 薄路由）
+│   ├── composition.py # 依赖组装（Composition Root）
+│   └── cli.py         # CLI 适配层
+├── tests/             # 测试（unit/integration/contract）
 └── pyproject.toml     # 项目配置
 ```
+
+> 旧导入路径（`modfetch.models` / `modfetch.exceptions` / `modfetch.services` /
+> `modfetch.download`）通过 shim 保持可用，已弃用，将随主版本移除。
 
 ## 🤝 贡献
 
