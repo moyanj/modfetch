@@ -10,7 +10,16 @@ from typing import Any, Dict, Optional
 
 
 class ModFetchError(Exception):
-    """ModFetch 基础异常类"""
+    """ModFetch 基础异常类
+
+    所有领域异常的统一基类，携带三要素：
+    - message: 人类可读的错误信息
+    - code: 稳定错误码（E 开头，供程序判断与 API 输出）
+    - context: 附加诊断上下文（如 status_code / url）
+
+    子类通过 _get_default_code 提供各自的默认错误码；
+    to_dict 用于 Web 层统一序列化错误响应。
+    """
 
     def __init__(
         self,
@@ -42,28 +51,35 @@ class ModFetchError(Exception):
 
 
 class ConfigError(ModFetchError):
-    """配置相关错误"""
+    """配置相关错误（E100 段）
+
+    配置读取、解析、验证过程中的失败统一归入此分支。
+    """
 
     def _get_default_code(self) -> str:
         return "E100"
 
 
 class ConfigParseError(ConfigError):
-    """配置解析错误"""
+    """配置解析错误：文件格式非法、字段类型错误等"""
 
     def _get_default_code(self) -> str:
         return "E101"
 
 
 class ConfigValidationError(ConfigError):
-    """配置验证错误"""
+    """配置验证错误：必填项缺失、枚举值不合法等"""
 
     def _get_default_code(self) -> str:
         return "E102"
 
 
 class APIError(ModFetchError):
-    """API 相关错误"""
+    """API 相关错误（E200 段）
+
+    外部 API 请求失败的基础类。除通用三要素外，额外把
+    status_code 与 url 写入 context，便于日志排查与用户提示。
+    """
 
     def __init__(
         self,
@@ -84,84 +100,98 @@ class APIError(ModFetchError):
 
 
 class APINotFoundError(APIError):
-    """API 资源不存在"""
+    """API 资源不存在（HTTP 404）"""
 
     def _get_default_code(self) -> str:
         return "E404"
 
 
 class APIRateLimitError(APIError):
-    """API 速率限制"""
+    """API 速率限制（HTTP 429），应退避后重试"""
 
     def _get_default_code(self) -> str:
         return "E429"
 
 
 class APIServerError(APIError):
-    """API 服务器错误"""
+    """API 服务器错误（HTTP 5xx）"""
 
     def _get_default_code(self) -> str:
         return "E500"
 
 
 class DownloadError(ModFetchError):
-    """下载相关错误"""
+    """下载相关错误（E300 段）
+
+    下载执行过程中的网络、校验、文件操作失败统一归入此分支。
+    """
 
     def _get_default_code(self) -> str:
         return "E300"
 
 
 class DownloadNetworkError(DownloadError):
-    """下载网络错误"""
+    """下载网络错误：连接失败、超时、断流等"""
 
     def _get_default_code(self) -> str:
         return "E301"
 
 
 class DownloadChecksumError(DownloadError):
-    """下载校验错误"""
+    """下载校验错误：下载内容与预期哈希不符"""
 
     def _get_default_code(self) -> str:
         return "E302"
 
 
 class DownloadFileError(DownloadError):
-    """下载文件操作错误"""
+    """下载文件操作错误：写入失败、磁盘空间不足等"""
 
     def _get_default_code(self) -> str:
         return "E303"
 
 
 class PackagerError(ModFetchError):
-    """打包相关错误"""
+    """打包相关错误（E400 段）
+
+    mrpack / zip 等产物生成失败统一归入此分支。
+    """
 
     def _get_default_code(self) -> str:
         return "E400"
 
 
 class MrpackError(PackagerError):
-    """Mrpack 生成错误"""
+    """Mrpack 生成错误：清单写入、overrides 打包等失败"""
 
     def _get_default_code(self) -> str:
         return "E401"
 
 
 class ZipError(PackagerError):
-    """ZIP 生成错误"""
+    """ZIP 生成错误：压缩失败、条目冲突等"""
 
     def _get_default_code(self) -> str:
         return "E402"
 
 
 class ValidationError(ModFetchError):
-    """验证相关错误"""
+    """验证相关错误（历史类型）
+
+    保留用于兼容旧的验证失败路径；新代码请优先使用
+    ConfigValidationError 等更具体的错误类型。
+    """
 
     def _get_default_code(self) -> str:
         return "E500"
 
 
 class PluginError(ModFetchError):
-    """插件系统相关错误（Python/Lua 插件加载与执行）"""
+    """插件系统相关错误（Python/Lua 插件加载与执行）
+
+    涵盖插件路径错误、文件格式分发失败、加载器内部异常等。
+    错误码 E600 起，为插件系统保留的错误段。
+    """
 
     def _get_default_code(self) -> str:
         return "E600"
@@ -170,7 +200,9 @@ class PluginError(ModFetchError):
 class ModrinthError(APIError):
     """Modrinth API 错误（向后兼容）
 
-    response 以鸭子类型提取 status/url，不依赖 aiohttp 类型。
+    response 以鸭子类型提取 status/url，不依赖 aiohttp 类型，
+    便于同时适配 CLI 与 Web 两种运行环境。
+    错误码由实际 HTTP 状态码推导（如 E404/E429/E500）。
     """
 
     def __init__(self, msg: str, response: Any):

@@ -86,7 +86,13 @@ def make_error_response(error: ModFetchError) -> JSONResponse:
 
 @router.get("/health", response_model=schemas.HealthResponse)
 async def health() -> schemas.HealthResponse:
-    """健康检查"""
+    """健康检查
+
+    用途：探活端点，供负载均衡/前端判断服务可用性。
+    请求：无参数。
+    响应：200，{status: "ok", version: <APP_VERSION>}。
+    错误码：无（恒 200）。
+    """
     return schemas.HealthResponse(status="ok", version=APP_VERSION)
 
 
@@ -100,7 +106,14 @@ async def validate_config(
     request: schemas.ValidateConfigRequest,
     http_request: Request,
 ) -> schemas.ValidateConfigResponse:
-    """验证配置文件"""
+    """验证配置文件
+
+    用途：对提交的配置做本地 + 远端（Modrinth）双重校验，供前端在创建任务前预检。
+    请求：{config: <原始配置字典>}。
+    响应：200，{valid: bool, errors: [{field, code, message, context?}]}；
+          valid=false 时 errors 含全部校验问题。
+    错误码：不抛 HTTP 错误，校验失败统一折叠进 errors（E101/E102 等）。
+    """
     errors: list[schemas.ValidationErrorItem] = []
     config_service = ConfigService()
 
@@ -156,7 +169,15 @@ async def create_job(
     request: schemas.CreateJobRequest,
     http_request: Request,
 ) -> schemas.CreateJobResponse:
-    """创建并启动新任务"""
+    """创建并启动新任务
+
+    用途：校验配置后创建作业并异步启动构建，返回作业 ID 供轮询/订阅。
+    请求：{config: <原始配置字典>}。
+    响应：201，{job_id: str, status: "pending"}。
+    错误码：
+        - 400：配置本地/远端校验失败（E102）
+        - 其余 ModFetch 错误经 error_code_to_http_status 映射
+    """
     job_manager: JobManager = http_request.app.state.job_manager
 
     # 先验证配置（统一配置边界）
@@ -200,7 +221,15 @@ async def create_job(
 
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str, http_request: Request) -> JSONResponse:
-    """获取任务状态"""
+    """获取任务状态
+
+    用途：按 job_id 查询作业当前状态（status/phase/stats/results/errors），
+          前端轮询用；实时推送请走 WebSocket /jobs/{job_id}/stream。
+    请求：路径参数 job_id。
+    响应：200，作业状态字典（JobState.to_response_dict() 结构）。
+    错误码：
+        - 404：任务不存在（NOT_FOUND）
+    """
     job_manager: JobManager = http_request.app.state.job_manager
     job = job_manager.get_job(job_id)
 
@@ -233,7 +262,15 @@ async def search(
     loader: Optional[str] = None,
     version: Optional[str] = None,
 ) -> schemas.SearchResponse:
-    """代理 Modrinth 搜索 API"""
+    """代理 Modrinth 搜索 API
+
+    用途：将前端搜索请求转发到 Modrinth /search，并做字段白名单映射。
+    请求（查询参数）：q 必填；limit/offset 分页；facets 原始过滤串；
+          type/loader/version 便捷过滤（经 build_modrinth_facets 组装）。
+    响应：200，{hits: [SearchHit...], offset, limit, total_hits}。
+    错误码：
+        - 502：Modrinth API 非 200（E200）
+    """
     params: dict[str, str] = {
         "query": q,
         "limit": str(limit),
@@ -288,7 +325,15 @@ async def search(
 async def get_project(
     slug_or_id: str, http_request: Request
 ) -> schemas.ProjectResponse:
-    """代理 Modrinth 项目信息 API"""
+    """代理 Modrinth 项目信息 API
+
+    用途：按 slug 或 ID 获取项目详情（含可用版本/加载器），供前端展示。
+    请求：路径参数 slug_or_id（slug 或项目 ID）。
+    响应：200，ProjectResponse（id/slug/title/description/categories 等）。
+    错误码：
+        - 404：项目不存在（E404）
+        - 502：Modrinth API 非 200（E200）
+    """
     catalog = _catalog(http_request)
     status, data = await catalog.raw_get(f"/project/{slug_or_id}")
     if status == 404:
@@ -342,7 +387,13 @@ async def get_project(
 async def minecraft_versions(
     http_request: Request,
 ) -> schemas.MinecraftVersionsResponse:
-    """获取 Minecraft 版本列表 (代理 Modrinth tag API)"""
+    """获取 Minecraft 版本列表 (代理 Modrinth tag API)
+
+    用途：下拉框数据源；Modrinth tag API 不可用时回退到静态版本表。
+    请求：无参数。
+    响应：200，MinecraftVersionsResponse（versions + 带 version_type 的 items）。
+    错误码：无；API 异常降级为静态数据并告警日志。
+    """
     try:
         status, data = await _catalog(http_request).raw_get("/tag/game_version")
         if status != 200:
@@ -386,7 +437,13 @@ async def minecraft_versions(
 async def minecraft_loaders(
     http_request: Request,
 ) -> schemas.MinecraftLoadersResponse:
-    """获取模组加载器列表 (代理 Modrinth tag API)"""
+    """获取模组加载器列表 (代理 Modrinth tag API)
+
+    用途：下拉框数据源；Modrinth tag API 不可用时回退到静态加载器表。
+    请求：无参数。
+    响应：200，MinecraftLoadersResponse（loaders: [{name, icon_url?}]）。
+    错误码：无；API 异常降级为静态数据并告警日志。
+    """
     try:
         status, data = await _catalog(http_request).raw_get("/tag/loader")
         if status != 200:

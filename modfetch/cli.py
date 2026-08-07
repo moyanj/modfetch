@@ -52,17 +52,31 @@ async def run_async(
     list_plugins: bool,
     dry_run: bool = False,
 ):
-    """异步运行"""
+    """运行 CLI 主流程（插件加载 + 配置校验 + 构建）
+
+    参数:
+        config_path: 配置文件路径（TOML/YAML/JSON）
+        features: 启用的功能标签，会覆盖到配置上
+        plugins: 显式指定的插件路径（本地文件或 URL，按后缀分发 .py/.lua）
+        plugin_dir: 插件目录，递归扫描其中的 .py 与 .lua 文件
+        list_plugins: 为真时仅列出现有插件后返回，不执行构建
+        dry_run: 干运行，只解析校验配置，不实际下载/打包
+
+    流程:
+        初始化插件系统（Python + Lua 双 loader）→ 加载插件 → 加载并校验配置
+        → （可选）干运行输出概要 → 通过 BuildApplicationService 执行构建。
+    """
     from modfetch.plugins import PluginManager, PluginLoader
 
-    # 初始化插件系统
+    # 初始化插件系统：Python loader 负责 .py，Lua loader 负责 .lua
     plugin_manager = PluginManager()
     plugin_loader = PluginLoader(plugin_manager)
     lua_plugin_manager = LuaPluginLoader(plugin_manager)
     await lua_plugin_manager.initialize()
 
     try:
-        # 加载插件目录
+        # 扫描插件目录：合并两类 loader 各自扫描到的 .py / .lua 文件，
+        # 再按后缀分发到对应 loader 加载
         if plugin_dir:
             plugin_paths = plugin_loader.scan_directory(
                 plugin_dir
@@ -74,6 +88,7 @@ async def run_async(
                     elif path.endswith(".py"):
                         await plugin_loader.load_from_path(path)
                     else:
+                        # 两个 scan_directory 只会返回 .py/.lua，此分支为防御兜底
                         raise PluginError("WTF？内存损坏？这是不可能被扫描的")
                 except Exception as e:
                     logger.warning(f"加载插件 {path} 失败: {e}")
@@ -191,12 +206,17 @@ def main(
     dry_run: bool,
     debug: bool,
 ):
-    """ModFetch - Minecraft 模组下载管理工具"""
+    """ModFetch - Minecraft 模组下载管理工具
+
+    入口点：解析 click 参数（feature/plugin 为可变参数），配置日志后
+    交由 run_async 异步执行构建。
+    """
     # 设置日志级别
     if debug:
         setup_logger(level="DEBUG")
         logger.debug("调试模式已启用")
 
+    # click 的 tuple 参数转为 list 传给异步主流程
     features = list(feature)
     plugin_list = list(plugins)
     asyncio.run(

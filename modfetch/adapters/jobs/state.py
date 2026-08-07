@@ -16,7 +16,10 @@ from typing import Optional
 
 @dataclass
 class JobStats:
-    """任务统计"""
+    """任务统计
+
+    从事件流折叠得到的进度指标（download 完成后由 stats_update 更新）。
+    """
 
     total_mods: int = 0
     resolved: int = 0
@@ -27,7 +30,10 @@ class JobStats:
 
 @dataclass
 class JobResultItem:
-    """任务结果项"""
+    """任务结果项
+
+    单个构建产物摘要，供 API 响应与前端列表展示。
+    """
 
     filename: str
     path: str
@@ -39,7 +45,10 @@ class JobResultItem:
 
 @dataclass
 class JobErrorItem:
-    """任务错误项"""
+    """任务错误项
+
+    结构化的单条错误（code/message/context），随 job_failed 折叠入状态。
+    """
 
     code: str
     message: str
@@ -53,6 +62,13 @@ class JobState:
 
     每个任务维护一组订阅者队列 (asyncio.Queue)，事件通过 broadcast()
     推送到所有订阅者。WebSocket 端点通过 subscribe() 创建新队列并消费事件。
+
+    状态机：
+        pending --start_job--> running --job_complete--> completed
+                                +--job_failed----------> failed
+      - job_started 事件将 pending 置为 running
+      - job_complete / job_failed 事件终结运行（phase 复位为 idle）
+      - 当前无显式取消/中断路径：任务随进程生命周期运行至终态
     """
 
     id: str
@@ -98,23 +114,35 @@ class JobState:
             self.event_history.pop(0)
 
     def _apply_event(self, event: dict[str, object]) -> None:
-        """将事件折叠到当前任务状态快照。"""
+        """将事件折叠到当前任务状态快照。
+
+        幂等地把事件反映到 status/phase/stats/results/errors 上：
+        - job_started → running
+        - phase_change → 阶段切换
+        - stats_update → 刷新进度统计
+        - job_complete → completed + 结果列表
+        - job_failed → failed + 错误列表（去重）
+        """
         event_type = event.get("event")
         data = event.get("data")
         if not isinstance(data, dict):
+            # 无 data 负载的事件不折叠
             return
 
         if event_type == "job_started":
+            # 状态转移: pending → running
             self.status = "running"
             return
 
         if event_type == "phase_change":
+            # 阶段切换: idle ↔ resolve / download / package
             phase = data.get("phase")
             if isinstance(phase, str):
                 self.phase = phase
             return
 
         if event_type == "stats_update":
+            # 折叠进度快照（缺失字段保留原值）
             total = _safe_int(data.get("total"), self.stats.total_mods)
             completed = _safe_int(data.get("completed"), self.stats.downloaded)
             failed = _safe_int(data.get("failed"), self.stats.failed)
@@ -128,16 +156,19 @@ class JobState:
             return
 
         if event_type == "resolve_complete":
+            # 仅累计 resolved 计数（resolve 无独立进度总量）
             self.stats.resolved += 1
             return
 
         if event_type == "job_complete":
+            # 状态转移: running → completed，阶段复位，写入结果
             self.status = "completed"
             self.phase = "idle"
             self.results = _parse_results(data.get("results"))
             return
 
         if event_type == "job_failed":
+            # 状态转移: running → failed，阶段复位，追加去重后的错误
             self.status = "failed"
             self.phase = "idle"
             error = _parse_error(data.get("error"))
@@ -145,7 +176,10 @@ class JobState:
                 self.errors.append(error)
 
     def to_response_dict(self) -> dict[str, object]:
-        """转换为 API 响应字典"""
+        """转换为 API 响应字典
+
+        输出与前端约定的 JSON 结构（字段名/空值语义与原接口一致）。
+        """
 
         def fmt_dt(dt: Optional[datetime]) -> Optional[str]:
             if dt is None:

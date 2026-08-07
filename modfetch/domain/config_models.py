@@ -15,7 +15,11 @@ from typing import Any, Dict, List, Optional, Union
 
 
 class ModLoader(Enum):
-    """模组加载器类型"""
+    """模组加载器类型
+
+    枚举值即 Modrinth API 使用的加载器标识符；mod_loader 字段支持
+    传入列表，实现同一份配置同时为多个加载器构建。
+    """
 
     FORGE = "forge"
     NEOFORGE = "neoforge"
@@ -24,21 +28,31 @@ class ModLoader(Enum):
 
 
 class OutputFormat(Enum):
-    """输出格式"""
+    """输出格式
+
+    决定构建产物的打包格式；OutputConfig.format 可同时指定多种。
+    """
 
     ZIP = "zip"
     MRPACK = "mrpack"
 
 
 class MrpackMode(Enum):
-    """Mrpack 模式"""
+    """Mrpack 打包模式
+
+    决定 .mrpack 产物中模组的收录方式：download 会把文件实体下载进
+    overrides，reference 则仅在 modrinth.index.json 中写入索引引用。
+    """
 
     DOWNLOAD = "download"  # 下载所有模组到 overrides
     REFERENCE = "reference"  # 使用 modrinth.index.json 引用模组（不下载）
 
 
 class FileType(Enum):
-    """文件类型"""
+    """文件类型
+
+    标识配置条目的类别，影响打包布局与产物元数据生成。
+    """
 
     MOD = "mod"
     FILE = "file"
@@ -48,7 +62,14 @@ class FileType(Enum):
 
 @dataclass
 class ConditionalEntry:
-    """条件配置项基类"""
+    """条件配置项基类
+
+    为各配置项提供通用条件字段：
+    - only_version: 仅指定的 Minecraft 版本生效
+    - feature: 仅指定的功能标签启用时生效（由 --feature 传入）
+
+    计划生成阶段会根据这些条件对条目进行过滤。
+    """
 
     only_version: Optional[Union[str, List[str]]] = None
     feature: Optional[Union[str, List[str]]] = None
@@ -56,7 +77,13 @@ class ConditionalEntry:
 
 @dataclass
 class ModEntry(ConditionalEntry):
-    """模组配置项"""
+    """模组配置项
+
+    表示一条模组引用：通过 id（slug）定位 Modrinth 上的项目，
+    可附带 version 固定版本、only_version/feature 过滤条件。
+    配置中既支持 "sodium" 这种纯字符串，也支持
+    { id = "iris", version = "1.7.x", feature = "graphics" } 对象形式。
+    """
 
     id: Optional[str] = None
     slug: Optional[str] = None
@@ -70,7 +97,11 @@ class ModEntry(ConditionalEntry):
 
 @dataclass
 class ExtraUrl(ConditionalEntry):
-    """额外下载链接配置"""
+    """额外下载链接配置
+
+    用于收录不通过 Modrinth 检索、直接指定 URL 下载的文件
+    （如自定义资源包、专属文件），可附带 sha1 校验与目标文件名。
+    """
 
     url: str = ""
     filename: Optional[str] = None
@@ -88,7 +119,11 @@ class ExtraUrl(ConditionalEntry):
 
 @dataclass
 class ParentConfig:
-    """父配置引用"""
+    """父配置引用
+
+    描述一个配置继承来源（本地文件或 URL）。解析阶段会先合并
+    from 引用的父配置，再以当前配置覆盖，实现配置复用。
+    """
 
     url: str = ""
     format: str = "toml"  # toml/json/yaml/xml/mrpack
@@ -102,7 +137,12 @@ class ParentConfig:
 
 @dataclass
 class MinecraftConfig:
-    """Minecraft 相关配置"""
+    """Minecraft 相关配置
+
+    核心配置段：声明目标 Minecraft 版本、加载器以及要收录的
+    模组/资源包/光影包/额外文件。version 与 mod_loader 均支持
+    列表，一次构建可覆盖多版本 × 多加载器组合。
+    """
 
     version: List[str] = field(default_factory=list)
     mod_loader: Union[ModLoader, List[ModLoader]] = ModLoader.FABRIC
@@ -131,7 +171,11 @@ class MinecraftConfig:
 
 @dataclass
 class OutputConfig:
-    """输出配置"""
+    """输出配置
+
+    控制产物输出位置与打包格式；format 与 mrpack_modes 均支持
+    多选，例如同时产出 zip 与 mrpack。
+    """
 
     download_dir: str = "downloads"
     format: List[OutputFormat] = field(default_factory=lambda: [OutputFormat.ZIP])
@@ -146,7 +190,11 @@ class OutputConfig:
 
 @dataclass
 class MetadataConfig:
-    """元数据配置"""
+    """元数据配置
+
+    整合包的展示信息（名称/版本/描述），会写入产物清单，
+    例如 mrpack 的 modrinth.index.json。
+    """
 
     name: str = "ModFetch Pack"
     version: str = "1.0.0"
@@ -155,7 +203,11 @@ class MetadataConfig:
 
 @dataclass
 class PluginConfig:
-    """插件配置"""
+    """插件配置
+
+    enabled 声明要启用的插件名（内置插件或已注册模块），
+    configs 为各插件提供可选的配置字典（按插件名索引）。
+    """
 
     enabled: List[str] = field(default_factory=list)
     configs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -163,7 +215,12 @@ class PluginConfig:
 
 @dataclass
 class ModFetchConfig:
-    """ModFetch 主配置类"""
+    """ModFetch 主配置类
+
+    聚合所有配置段（minecraft / output / metadata / plugins）与全局
+    选项，是配置解析（from_dict）与构建执行（BuildApplicationService）
+    之间统一的数据载体；_raw_config 保留原始字典用于调试与兼容。
+    """
 
     # 必需配置段
     minecraft: MinecraftConfig = field(default_factory=MinecraftConfig)
@@ -176,7 +233,7 @@ class ModFetchConfig:
     max_concurrent: int = 5
     max_retries: int = 3
     retry_delay: float = 1.0  # 初始重试延迟（秒）
-    verify_ssl: bool = True
+    verify_ssl: bool = True  # 是否校验 TLS 证书（用于 API 请求与下载）
     features: List[str] = field(default_factory=list)
     parent_configs: List[ParentConfig] = field(default_factory=list)
     plugins: PluginConfig = field(default_factory=PluginConfig)

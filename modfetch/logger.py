@@ -20,6 +20,9 @@ def setup_logger(
     """
     设置日志记录器
 
+    包根横切关注点：统一 loguru 配置，供 CLI/Server/库调用方复用。
+    默认级别取环境变量 MODFETCH_DEBUG（=1 时 DEBUG，否则 INFO）。
+
     Args:
         level: 日志级别 (DEBUG, INFO, WARNING, ERROR)
         sink: 输出目标
@@ -49,7 +52,7 @@ def setup_logger(
 
 
 def get_logger():
-    """获取日志记录器实例"""
+    """获取日志记录器实例（返回 loguru 全局 logger）"""
     return logger
 
 

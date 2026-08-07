@@ -29,7 +29,7 @@ except ImportError:
 
 
 class PluginLoadError(ModFetchError):
-    """插件加载错误"""
+    """插件加载错误（路径不存在、格式不支持、源码校验失败等统一抛出）"""
 
     pass
 
@@ -38,15 +38,18 @@ class PluginLoader:
     """
     插件加载器
 
+    负责 Python 插件的发现、加载与注册（Lua 插件由 LuaPluginLoader 处理）。
     支持多种方式加载插件：
     1. 本地 Python 文件 (.py)
     2. 本地插件目录
     3. Python 模块路径 (modfetch.plugins.xxx)
     4. 远程 URL (HTTP/HTTPS)
+    所有入口最终统一走 _register_plugin_from_module 注册到 PluginManager。
     """
 
     def __init__(self, plugin_manager: PluginManager):
         self.plugin_manager = plugin_manager
+        # 已加载的模块缓存：key 为模块名，避免同一模块重复 exec
         self._loaded_modules: Dict[str, Any] = {}
 
     async def load_from_path(
@@ -55,6 +58,9 @@ class PluginLoader:
         """
         从路径加载插件
 
+        按输入自动分派：URL → _load_from_url；现有文件 → _load_from_file；
+        现有目录 → _load_from_directory；其余按模块名尝试 import。
+
         Args:
             path: 插件路径（文件、目录或模块名）
             config: 插件配置
@@ -62,7 +68,7 @@ class PluginLoader:
         Returns:
             bool: 是否加载成功
         """
-        # 判断路径类型
+        # 判断路径类型并分发到对应的具体加载流程
         if path.startswith("http://") or path.startswith("https://"):
             return await self._load_from_url(path, config)
         elif os.path.isfile(path):
@@ -78,6 +84,9 @@ class PluginLoader:
     ) -> Dict[str, bool]:
         """
         批量加载插件
+
+        逐个调用 load_from_path，单个失败不中断其余加载，
+        最终以 {路径: 是否成功} 汇总结果。
 
         Args:
             paths: 插件路径列表
@@ -102,7 +111,22 @@ class PluginLoader:
     async def _load_from_file(
         self, file_path: str, config: Optional[Dict[str, Any]]
     ) -> bool:
-        """从 Python 文件加载插件"""
+        """
+        从单个 .py 文件加载插件
+
+        流程：读取源码 → AST 安全检查 → 用 importlib 以独立模块名动态 exec →
+        注册模块中的插件类。
+
+        Args:
+            file_path: Python 文件路径
+            config: 插件配置
+
+        Returns:
+            bool: 是否加载成功
+
+        Raises:
+            PluginLoadError: 文件不存在 / 非 .py 后缀 / 语法或校验失败
+        """
         path = Path(file_path)
 
         if not path.exists():
@@ -115,13 +139,14 @@ class PluginLoader:
         source = path.read_text(encoding="utf-8")
         self._validate_plugin_source(source)
 
-        # 动态加载模块
+        # 动态加载模块：以独立模块名装载，避免与业务模块命名冲突
         module_name = f"modfetch_plugin_{path.stem}"
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:
             raise PluginLoadError(f"无法创建模块规范: {file_path}")
 
         module = importlib.util.module_from_spec(spec)
+        # 注册进 sys.modules：使模块内部相对导入与后续重载行为一致
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
 
@@ -130,7 +155,19 @@ class PluginLoader:
     async def _load_from_directory(
         self, dir_path: str, config: Optional[Dict[str, Any]]
     ) -> bool:
-        """从目录加载插件"""
+        """
+        从目录加载插件
+
+        目录约定：优先加载 __init__.py（视为包入口），
+        否则取目录下第一个 .py 文件。
+
+        Args:
+            dir_path: 插件目录路径
+            config: 插件配置
+
+        Returns:
+            bool: 是否加载成功
+        """
         path = Path(dir_path)
 
         if not path.exists():
@@ -155,12 +192,18 @@ class PluginLoader:
         """
         从 Python 模块加载插件（公共方法）
 
+        用于加载已安装/可导入的模块（如内置插件 modfetch.plugins.builtin.xxx）。
+        若模块已在 sys.modules 中则直接复用，否则通过 importlib 导入。
+
         Args:
             module_name: 模块名称（如 'modfetch.plugins.builtin.myplugin'）
             config: 插件配置
 
         Returns:
             bool: 是否加载成功
+
+        Raises:
+            PluginLoadError: 模块无法导入
         """
         try:
             # 尝试导入模块
@@ -175,7 +218,22 @@ class PluginLoader:
             raise PluginLoadError(f"无法导入模块 {module_name}: {e}")
 
     async def _load_from_url(self, url: str, config: Optional[Dict[str, Any]]) -> bool:
-        """从远程 URL 加载插件"""
+        """
+        从远程 URL 加载插件
+
+        下载源码 → AST 安全检查 → 写入临时 .py 文件 → 复用 _load_from_file 加载，
+        加载完成后无论成败都清理临时文件。
+
+        Args:
+            url: 插件源码 URL
+            config: 插件配置
+
+        Returns:
+            bool: 是否加载成功
+
+        Raises:
+            PluginLoadError: 协议不支持 / 下载失败 / 非 200
+        """
         parsed = urlparse(url)
 
         if parsed.scheme not in ("http", "https"):
@@ -214,14 +272,25 @@ class PluginLoader:
         """
         验证插件源码安全性
 
-        检查是否包含危险操作。
+        对源码做 AST 解析并扫描危险导入（os.system / subprocess / eval / exec /
+        compile / __import__ / importlib / sys.modules 等）。命中仅记录 warning，
+        不阻断加载——这是"提示而非硬隔离"的安全策略，真正的沙箱隔离不在本层保证。
+
+        Args:
+            source: 插件源码文本
+
+        Returns:
+            bool: 语法合法即返回 True
+
+        Raises:
+            PluginLoadError: 源码存在语法错误
         """
         try:
             tree = ast.parse(source)
         except SyntaxError as e:
             raise PluginLoadError(f"插件源码语法错误: {e}")
 
-        # 检查危险导入
+        # 检查危险导入：这些模块/内建可被用于执行任意代码或逃逸沙箱
         dangerous_modules = {
             "os.system",
             "subprocess",
@@ -251,16 +320,22 @@ class PluginLoader:
         """
         从模块中查找并注册插件类
 
+        遍历模块成员，筛选出继承 ModFetchPlugin 且声明了非空 name 的类，
+        取第一个实例化并注册到 PluginManager。
+
         Args:
             module: Python 模块
             config: 插件配置
 
         Returns:
             bool: 是否成功注册
+
+        Raises:
+            PluginLoadError: 模块中未找到有效插件类
         """
         plugin_classes = []
 
-        # 查找模块中所有的插件类
+        # 查找模块中所有的插件类（排除基类本身与未命名类）
         for name, obj in inspect.getmembers(module):
             if (
                 inspect.isclass(obj)
@@ -283,6 +358,9 @@ class PluginLoader:
     def scan_directory(self, directory: str) -> List[str]:
         """
         扫描目录中的所有插件
+
+        递归查找目录下所有 .py 文件，跳过 __pycache__ 与 test_ 前缀的测试文件。
+        返回的是待加载的路径列表，实际加载由 load_from_path 完成。
 
         Args:
             directory: 要扫描的目录

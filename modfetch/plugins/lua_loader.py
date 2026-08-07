@@ -33,7 +33,10 @@ class LuaPluginLoader:
     """
     Lua 插件加载器
 
-    负责加载和管理 Lua 插件。
+    负责 Lua 插件的发现、加载与注册（与 PluginLoader 对应，按 .lua 后缀分发）。
+    每个 Lua 插件在加载时都会创建独立的 LuaRuntimeManager 实例（共享 ModrinthClient
+    与配置），并通过 LuaPluginWrapper 适配成 ModFetchPlugin 接口后注册进 PluginManager。
+    使用前必须先 await initialize() 启动运行时，结束时 await shutdown() 释放。
     """
 
     def __init__(
@@ -42,22 +45,32 @@ class LuaPluginLoader:
         modrinth_client: Optional[ModrinthClient] = None,
         config: Optional[ModFetchConfig] = None,
     ):
+        """
+        初始化 Lua 插件加载器
+
+        Args:
+            plugin_manager: 插件管理器（Lua 插件最终注册到这里）
+            modrinth_client: 可选，注入给 Lua 运行时以暴露 Modrinth API
+            config: 可选，注入给 Lua 运行时以暴露配置 API
+        """
         self.plugin_manager = plugin_manager
         self._modrinth_client = modrinth_client
         self._config = config
+        # 加载器级运行时：用于 initialize/shutdown 的全局生命周期管理
         self._runtime = LuaRuntimeManager(
             modrinth_client=modrinth_client,
             config=config,
         )
+        # 已加载的 Lua 插件包装器，key 为插件名
         self._loaded_plugins: Dict[str, LuaPluginWrapper] = {}
 
     async def initialize(self) -> None:
-        """初始化 Lua 运行时"""
+        """初始化 Lua 运行时（加载器级运行时，供全局环境准备）"""
         self._runtime.initialize()
         logger.debug("Lua 插件加载器已初始化")
 
     async def shutdown(self) -> None:
-        """关闭 Lua 运行时"""
+        """关闭 Lua 运行时：先逐个关闭已加载插件，再释放加载器级运行时"""
         for name, plugin in self._loaded_plugins.items():
             await plugin.shutdown()
         self._runtime.shutdown()
@@ -68,6 +81,9 @@ class LuaPluginLoader:
     ) -> bool:
         """
         从路径加载 Lua 插件
+
+        按输入自动分派：URL → _load_from_url；现有文件 → _load_from_file；
+        其余路径视为不支持并记录错误。
 
         Args:
             path: 插件路径（文件或 URL）
@@ -92,6 +108,8 @@ class LuaPluginLoader:
         """
         批量加载 Lua 插件
 
+        逐个调用 load_from_path，单个失败不中断其余加载。
+
         Args:
             paths: 插件路径列表
             configs: 插件配置字典
@@ -115,7 +133,20 @@ class LuaPluginLoader:
     async def _load_from_file(
         self, file_path: str, config: Optional[Dict[str, Any]] = None
     ) -> bool:
-        """从文件加载 Lua 插件"""
+        """
+        从单个 .lua 文件加载插件
+
+        流程：校验后缀 → 创建独立 LuaRuntimeManager 并初始化 → 用 LuaPluginWrapper
+        包装 → load_from_file 执行脚本并读取元数据/注册 Hook → 注册到 PluginManager。
+        任一步失败都会关闭该插件专属运行时，避免资源泄漏。
+
+        Args:
+            file_path: Lua 文件路径
+            config: 插件配置
+
+        Returns:
+            bool: 是否加载成功
+        """
         path = Path(file_path)
 
         if not path.exists():
@@ -127,6 +158,7 @@ class LuaPluginLoader:
             return False
 
         # 创建新的运行时实例（每个插件独立，共享客户端和配置）
+        # 独立运行时保证插件间 Lua 全局环境互不污染，也便于单独释放
         runtime = LuaRuntimeManager(
             modrinth_client=self._modrinth_client,
             config=self._config,
@@ -147,6 +179,7 @@ class LuaPluginLoader:
                     self._loaded_plugins[plugin_name] = wrapper
                     return True
                 else:
+                    # 注册失败（如重名）时关闭插件并释放运行时
                     await wrapper.shutdown()
                     return False
             else:
@@ -161,7 +194,19 @@ class LuaPluginLoader:
     async def _load_from_url(
         self, url: str, config: Optional[Dict[str, Any]] = None
     ) -> bool:
-        """从 URL 加载 Lua 插件"""
+        """
+        从 URL 加载 Lua 插件
+
+        下载源码 → 写入临时 .lua 文件 → 复用 _load_from_file 加载，
+        加载完成后无论成败都清理临时文件。
+
+        Args:
+            url: 插件源码 URL
+            config: 插件配置
+
+        Returns:
+            bool: 是否加载成功
+        """
         parsed = urlparse(url)
 
         if parsed.scheme not in ("http", "https"):
@@ -200,6 +245,9 @@ class LuaPluginLoader:
         """
         扫描目录中的所有 Lua 插件
 
+        递归查找目录下所有 .lua 文件，跳过隐藏文件与 test_ 前缀的测试文件。
+        返回待加载路径列表，实际加载由 load_from_path 完成。
+
         Args:
             directory: 要扫描的目录
 
@@ -224,6 +272,8 @@ class LuaPluginLoader:
     async def unload_plugin(self, name: str) -> bool:
         """
         卸载 Lua 插件
+
+        从 PluginManager 注销 → 关闭插件（释放其 Lua 运行时）→ 移除本地记录。
 
         Args:
             name: 插件名称
@@ -254,7 +304,7 @@ class LuaPluginLoader:
         列出所有已加载的 Lua 插件
 
         Returns:
-            List[Dict[str, Any]]: 插件信息列表
+            List[Dict[str, Any]]: 每个元素为插件的元数据摘要（name/version/description/author/enabled）
         """
         return [
             {

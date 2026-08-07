@@ -12,7 +12,11 @@ from modfetch.ports.catalog import CatalogPort
 
 
 class VersionMatcher:
-    """版本匹配器"""
+    """版本匹配器
+
+    负责 Minecraft 版本匹配、配置条目过滤（only_version/feature）
+    与加载器版本查询，供计划生成阶段筛选条目。
+    """
 
     def __init__(self, catalog: Optional[CatalogPort] = None):
         self.catalog = catalog
@@ -22,7 +26,10 @@ class VersionMatcher:
         version: str,
         target_versions: Union[str, List[str]],
     ) -> bool:
-        """检查版本是否匹配目标版本列表"""
+        """检查版本是否匹配目标版本列表（支持单字符串或列表）
+
+        当前为精确匹配：version 必须逐字命中 target_versions。
+        """
         if isinstance(target_versions, str):
             target_versions = [target_versions]
         return version in target_versions
@@ -61,7 +68,10 @@ class VersionMatcher:
         loader: ModLoader,
         mc_version: str,
     ) -> Optional[str]:
-        """获取模组加载器版本（统一走 CatalogPort）"""
+        """获取模组加载器版本（统一走 CatalogPort）
+
+        未注入 catalog 时返回 None，由调用方决定是否可选降级。
+        """
         if not self.catalog:
             return None
         return await self.catalog.get_loader_version(loader.value, mc_version)

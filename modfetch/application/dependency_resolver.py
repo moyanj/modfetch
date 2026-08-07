@@ -19,11 +19,11 @@ from modfetch.ports.catalog import CatalogPort
 class ResolveContext:
     """per-call 解析状态（局部化，不挂在实例上）"""
 
-    visited: Set[str] = field(default_factory=set)
-    visiting: List[str] = field(default_factory=list)  # 循环检测（保序栈）
-    resolved: List[Tuple[ProjectInfo, VersionInfo, dict]] = field(default_factory=list)
-    missing: List[str] = field(default_factory=list)
-    cycles: List[List[str]] = field(default_factory=list)
+    visited: Set[str] = field(default_factory=set)  # 已解析的 project_id（全局去重）
+    visiting: List[str] = field(default_factory=list)  # 当前解析路径（循环检测，保序栈）
+    resolved: List[Tuple[ProjectInfo, VersionInfo, dict]] = field(default_factory=list)  # (project, version, file)
+    missing: List[str] = field(default_factory=list)  # 无法解析的 project_id（诊断用）
+    cycles: List[List[str]] = field(default_factory=list)  # 检测到的环路径（project_id 序列）
 
 
 @dataclass
@@ -54,7 +54,17 @@ class DependencyGraphResolver:
         mc_version: str,
         loader: str,
     ) -> DependencyGraph:
-        """解析 root 版本的全部 required 依赖（递归）"""
+        """解析 root 版本的全部 required 依赖（递归）
+
+        Args:
+            root: 依赖树的根版本信息
+            mc_version: Minecraft 版本（依赖解析需匹配平台版本）
+            loader: 加载器
+
+        Returns:
+            DependencyGraph: resolved 依赖列表 + missing 缺失项 +
+            cycles 环路径；缺失与环仅记录诊断，不抛异常。
+        """
         ctx = ResolveContext()
         await self._resolve_recursive(root, mc_version, loader, ctx)
         return DependencyGraph(
@@ -70,8 +80,14 @@ class DependencyGraphResolver:
         loader: str,
         ctx: ResolveContext,
     ) -> None:
+        """递归解析依赖（深度优先，状态收敛到 ctx）
+
+        仅处理 required 依赖；以 visiting 栈检测环、visited 集合
+        避免重复展开。项目缺失或版本不可得时记入 missing。
+        """
         for dep in version_info.dependencies:
             if dep.dependency_type != "required":
+                # 可选依赖不参与下载解析（由模组自身运行时处理）
                 continue
 
             dep_id = dep.project_id
@@ -97,11 +113,14 @@ class DependencyGraphResolver:
                 dep_id, mc_version, loader
             )
             if version is None or file_info is None:
+                # 当前 MC 版本/加载器下无匹配版本 → 记入 missing
                 ctx.missing.append(dep_id)
                 ctx.visiting.remove(dep_id)
                 continue
 
             ctx.resolved.append((project, version, file_info))
+            # 先记录本节点再递归其依赖，输出序为深度优先（根在前）
             await self._resolve_recursive(version, mc_version, loader, ctx)
 
+            # 递归完成后出栈，使兄弟分支不再被误判为环
             ctx.visiting.remove(dep_id)

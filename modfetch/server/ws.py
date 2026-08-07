@@ -21,6 +21,15 @@ async def job_stream(websocket: WebSocket, job_id: str) -> None:
 
     连接后立即开始接收事件，直到任务完成或失败。
     支持多个客户端同时订阅同一任务。
+
+    事件推送格式（JSON，每帧一个事件）：
+        {"event": <EventType.value>, "data": {job_id, event_id, sequence,
+         timestamp, ...payload}}
+    - event: 事件类型字符串（见 domain/events.py EventType）
+    - data.job_id / event_id / sequence / timestamp: 事件信封公共字段
+    - data 其余键来自 payload，随事件类型而异（如下载进度、错误信息）
+    特殊帧：
+        {"event": "error", "data": {code, message}} — 任务不存在或连接期错误
     """
     await websocket.accept()
     logger.info(f"WebSocket 连接: job_id={job_id}")

@@ -6,9 +6,14 @@ from modfetch.domain.events import BuildEvent, EventType
 
 
 class LogEventSink:
-    """将构建事件映射为 loguru 日志的 EventSink"""
+    """将构建事件映射为 loguru 日志的 EventSink（CLI 进度输出）
+
+    仅订阅对用户有展示价值的事件（配置/计划/下载/打包/终态），
+    其余事件类型有意忽略，避免终端噪声。
+    """
 
     async def publish(self, event: BuildEvent) -> None:
+        """按事件类型输出对应级别日志（info/success/error 分级）"""
         data = event.payload
         et = event.event_type
 

@@ -33,14 +33,23 @@ from modfetch.ports.packager import PackagerPort
 
 @dataclass(frozen=True)
 class BuildOptions:
-    """构建执行选项"""
+    """构建执行选项
+
+    download_dir: 制品落盘根目录（每个 target 下再建 version/loader 子目录）
+    max_concurrent: 下载并发上限（DownloadExecutor 队列）
+    """
 
     download_dir: str = "downloads"
     max_concurrent: int = 5
 
 
 class ExecuteBuild:
-    """下载 + 打包执行用例"""
+    """下载 + 打包执行用例
+
+    按 BuildPlan 逐 target 执行: 先并发下载全部制品，再按输出规格打包。
+    下载/打包失败均记为 BuildError（phase 区分），不中断其余 target，
+    最终以 BuildResult 值传递错误。
+    """
 
     def __init__(
         self,
@@ -59,7 +68,19 @@ class ExecuteBuild:
         event_sink: EventSink,
         options: Optional[BuildOptions] = None,
     ) -> BuildResult:
+        """按计划执行全部 target 的下载与打包
+
+        Args:
+            plan: 构建计划（targets/artifacts/outputs）
+            job_id: 作业标识（事件关联用）
+            event_sink: 生命周期事件接收器
+            options: 执行选项；省略时用默认值（downloads/并发 5）
+
+        Returns:
+            BuildResult: 聚合产物与错误；errors 以值传递，不抛异常。
+        """
         options = options or BuildOptions()
+        # 工作区根目录（下载与打包共用），目录缺失时自动创建
         workspace = Path(options.download_dir)
         workspace.mkdir(parents=True, exist_ok=True)
 
@@ -97,6 +118,7 @@ class ExecuteBuild:
                     event_sink, job_id, EventType.PACKAGE_STARTED,
                     {"format": spec.format, "target": target.dir_name},
                 )
+                # 单 target 打包失败仅记录错误，继续后续规格/目标（不中断整体）
                 try:
                     artifact = await self._packager.package(
                         plan, spec, target, workspace
@@ -155,7 +177,11 @@ class ExecuteBuild:
         job_id: str,
         event_sink: EventSink,
     ):
-        """下载单个 target 的全部制品"""
+        """下载单个 target 的全部制品
+
+        仅 catalog 来源且无需真实文件（如 mrpack reference 模式）的制品
+        跳过下载；其余制品统一经 DownloadExecutor 并发提交。
+        """
         needs_download = self._needs_download(plan, target)
         version_dir = workspace / target.dir_name
         version_dir.mkdir(parents=True, exist_ok=True)
@@ -225,6 +251,7 @@ class ExecuteBuild:
     def _make_task(
         artifact: ResolvedArtifact, version_dir: Path
     ) -> DownloadTask:
+        """将制品转换为下载任务（目标目录 = version_dir/品类子目录）"""
         dest_dir = version_dir / os.path.dirname(artifact.destination)
         return DownloadTask(
             url=artifact.url,
@@ -237,6 +264,7 @@ class ExecuteBuild:
     async def _publish(
         sink: EventSink, job_id: str, event_type: EventType, payload: dict
     ) -> None:
+        """发布构建生命周期事件"""
         await sink.publish(
             BuildEvent(job_id=job_id, event_type=event_type, payload=payload)
         )

@@ -36,6 +36,15 @@ def create_build_service(
 ) -> BuildApplicationService:
     """组装 BuildApplicationService
 
+    依赖图（注入顺序自底向上）：
+        ModrinthClient(catalog) ──┬─→ PlanBuild ─────────┐
+                                  │                      ├─→ BuildApplicationService
+        FileArtifactStore ─→ HttpDownloader ─→ ExecuteBuild┘
+        RetryPolicy ────────────↗                │
+        PackagerDispatcher(mrpack/zip) ──────────↗
+        LogEventSink/自定义 event_sink ─────────→ BuildApplicationService
+        ConfigService ─────────────────────────→ BuildApplicationService
+
     Args:
         event_sink: 事件接收器（默认 LogEventSink）
         max_concurrent: 下载并发数
@@ -44,19 +53,25 @@ def create_build_service(
         verify_ssl: 是否校验 TLS（默认开启）
         catalog: 自定义 CatalogPort（测试注入用）
     """
+    # 默认 catalog：生产走 ModrinthClient，测试注入 stub 实现（对应 CatalogPort）
     catalog = catalog or ModrinthClient()
 
+    # 制品存储（ArtifactStorePort）：文件落盘与哈希校验的基础设施
     store = FileArtifactStore()
+    # 重试策略：下载重试次数与基础延迟
     retry = RetryPolicy(max_retries=max_retries, base_delay=retry_delay)
+    # 下载器（DownloaderPort）：将任务写入 store，失败按 retry 重试，受 verify_ssl 约束
     downloader = HttpDownloader(
         retry_policy=retry,
         artifact_store=store,
         verify_ssl=verify_ssl,
     )
 
+    # 加载器版本解析闭包：mrpack 打包需要的最新 loader 版本，委托给 catalog
     async def loader_version_resolver(loader, mc_version: str):
         return await catalog.get_loader_version(loader.value, mc_version)
 
+    # 打包器（PackagerPort）分派：按 format 路由到 mrpack/zip 具体实现
     packager = PackagerDispatcher(
         {
             "mrpack": MrpackPackager(
@@ -66,13 +81,18 @@ def create_build_service(
         }
     )
 
+    # 配置服务：统一配置边界（解析/校验）
     config_service = ConfigService()
+    # 计划生成用例：解析配置为 BuildPlan（依赖 catalog 与依赖图解析器）
     plan_build = PlanBuild(catalog, DependencyGraphResolver(catalog))
+    # 执行用例：按计划下载（受并发限制）并交给打包器产出制品
     execute_build = ExecuteBuild(
         downloader, packager, max_concurrent=max_concurrent
     )
+    # 事件接收器：默认写日志，可注入作业/复合接收器（EventSink）
     sink = event_sink or LogEventSink()
 
+    # 应用服务：统一入口，串起配置/计划/执行/事件四个用例
     return BuildApplicationService(
         config_service=config_service,
         plan_build=plan_build,

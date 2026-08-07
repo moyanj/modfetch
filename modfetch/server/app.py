@@ -29,6 +29,15 @@ def create_app() -> FastAPI:
     """
     创建 FastAPI 应用实例
 
+    工厂模式：每次调用返回独立应用实例，便于测试隔离与多实例部署。
+    组装内容：
+        - CORS 中间件：允许前端开发服务器跨域访问
+        - app.state.job_manager：全局作业管理器（REST/WS 共享）
+        - app.state.catalog：共享 Modrinth 客户端（REST 代理用）
+        - REST 路由（/api/*）与 WebSocket 路由（/api/jobs/*/stream）
+        - 生产环境静态文件挂载（Vue 构建输出 web/dist）
+        - startup/shutdown 生命周期钩子（关闭时释放 catalog 连接）
+
     Returns:
         FastAPI: 配置好的应用实例
     """

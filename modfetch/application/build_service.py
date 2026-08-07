@@ -21,7 +21,12 @@ from modfetch.ports.event_sink import EventSink
 
 
 class BuildApplicationService:
-    """统一构建入口"""
+    """统一构建入口
+
+    编排完整构建生命周期: 本地校验 → 远程校验 → 计划生成 → 执行 → 结果事件。
+    CLI 与 Web 均通过本服务执行构建；错误以 BuildResult.errors 值传递，
+    校验失败则直接抛 ConfigValidationError（fail-fast）。
+    """
 
     def __init__(
         self,
@@ -43,7 +48,23 @@ class BuildApplicationService:
         event_sink: Optional[EventSink] = None,
         skip_remote_validation: bool = False,
     ) -> BuildResult:
+        """执行一次完整构建
+
+        Args:
+            config: 已解析的用户配置（version/loader/模组清单）
+            job_id: 构建作业标识（事件关联用，Web 端为作业 id）
+            options: 执行选项；省略时按 config.output.download_dir 与
+                config.max_concurrent 派生默认值
+            event_sink: 本次构建的事件接收器；省略时回退构造注入的实例
+            skip_remote_validation: True 时跳过远程校验
+                （Web 预览等已校验场景）
+
+        Returns:
+            BuildResult: 含 outputs 与 errors；errors 非空表示部分失败，
+            调用方据此判定成败（值传递，不抛异常）。
+        """
         sink = event_sink or self._event_sink
+        # 未显式提供时从配置派生默认下载目录与并发上限
         options = options or BuildOptions(
             download_dir=config.output.download_dir,
             max_concurrent=config.max_concurrent,
@@ -62,6 +83,7 @@ class BuildApplicationService:
             )
             if not report.is_valid:
                 message = format_validation_issues(report.issues)
+                # 远程校验失败属不可恢复错误: 先发布失败事件再 fail-fast 抛出
                 await self._publish(
                     sink, job_id, EventType.BUILD_FAILED,
                     {"error": {"code": "E102", "message": message}},
@@ -75,6 +97,7 @@ class BuildApplicationService:
         await self._publish(
             sink, job_id, EventType.PLAN_CREATED,
             {
+                # 计划规模快照（供前端进度展示）
                 "targets": len(plan.targets),
                 "artifacts": len(plan.artifacts),
                 "outputs": len(plan.outputs),
@@ -86,7 +109,7 @@ class BuildApplicationService:
             plan, job_id, sink, options
         )
 
-        # 5. 结果事件
+        # 5. 结果事件（有错误按失败收尾，否则按成功收尾；结果以值传递）
         if result.errors:
             await self._publish(
                 sink, job_id, EventType.BUILD_FAILED,
@@ -131,6 +154,7 @@ class BuildApplicationService:
     async def _publish(
         sink: EventSink, job_id: str, event_type: EventType, payload: dict = None
     ) -> None:
+        """发布一条构建事件（payload 缺省时为空对象）"""
         await sink.publish(
             BuildEvent(
                 job_id=job_id, event_type=event_type, payload=payload or {}

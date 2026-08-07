@@ -21,6 +21,8 @@ from modfetch.ports.catalog import CatalogPort
 
 @dataclass
 class ValidationSuggestion:
+    """校验失败时的候选推荐（供用户替换近似条目）"""
+
     slug: str
     project_id: str
     title: str
@@ -30,6 +32,8 @@ class ValidationSuggestion:
 
 @dataclass
 class ValidationIssue:
+    """单条目校验问题（含定位字段、错误码与候选建议）"""
+
     field: str
     code: str
     message: str
@@ -41,7 +45,10 @@ class ValidationIssue:
 
 @dataclass
 class ConfigValidationResult:
-    """远程校验报告（ValidationReport）"""
+    """远程校验报告
+
+    valid: 是否全部通过；issues: 未通过时的全部问题列表。
+    """
 
     valid: bool
     issues: list[ValidationIssue] = field(default_factory=list)
@@ -58,6 +65,11 @@ class ProjectValidationService:
         self.catalog = catalog
 
     async def validate_config(self, config: ModFetchConfig) -> ConfigValidationResult:
+        """校验配置中全部 mods/resourcepacks/shaderpacks 条目（并发）
+
+        为每个条目构造校验任务并经 asyncio.gather 并发执行，
+        单条失败不中断其余条目；返回聚合报告。
+        """
         loaders = self._loader_values(config)
 
         # 构造 (entry, entry_type, field, loaders) 任务列表
@@ -106,6 +118,13 @@ class ProjectValidationService:
         mc_versions: Iterable[str],
         loaders: Iterable[str],
     ) -> Optional[ValidationIssue]:
+        """校验单个条目: 存在性 → 类型 → 版本×加载器兼容性
+
+        Returns:
+            None 表示通过；否则返回对应的 ValidationIssue
+            （含 NOT_FOUND/TYPE_MISMATCH/INCOMPATIBLE 等错误码）。
+            兼容性检查按 version × loader 并发执行。
+        """
         identifier = self._entry_identifier(entry)
         if not identifier:
             return ValidationIssue(
@@ -182,6 +201,7 @@ class ProjectValidationService:
         mc_versions: Iterable[str],
         loaders: Iterable[str],
     ) -> list[ValidationSuggestion]:
+        """按首个版本/加载器搜索近似项目，返回候选列表（最多 5 条）"""
         first_version = next(iter(mc_versions), None)
         first_loader = next(iter(loaders), "")
         candidates = await self.catalog.search(
@@ -203,14 +223,17 @@ class ProjectValidationService:
         ]
 
     def _loader_values(self, config: ModFetchConfig) -> list[str]:
+        """展开配置声明的加载器为枚举值列表"""
         return [loader.value for loader in config.minecraft.loaders()]
 
     def _entry_identifier(self, entry: Union[str, ModEntry]) -> Optional[str]:
+        """提取条目查询标识（字符串条目本身即 slug；ModEntry 优先 id）"""
         if isinstance(entry, str):
             return entry
         return entry.id or entry.slug
 
     def _expected_project_types(self, entry_type: str) -> set[str]:
+        """条目类型 → 允许的项目类型集合（兼容平台历史别名）"""
         mapping = {
             "mod": {"mod"},
             "resourcepack": {"resourcepack", "resource_pack"},
@@ -219,6 +242,7 @@ class ProjectValidationService:
         return mapping[entry_type]
 
     def _search_project_type(self, entry_type: str) -> str:
+        """条目类型 → 平台搜索用的 project_type 参数"""
         mapping = {
             "mod": "mod",
             "resourcepack": "resourcepack",
@@ -227,12 +251,14 @@ class ProjectValidationService:
         return mapping[entry_type]
 
     def _project_type_value(self, project_type: Union[str, ProjectType]) -> str:
+        """归一化项目类型为字符串（兼容枚举与原生字符串）"""
         if isinstance(project_type, ProjectType):
             return project_type.value
         return str(project_type)
 
 
 def format_validation_issues(issues: list[ValidationIssue]) -> str:
+    """格式化问题列表为可读文本（含候选建议），供错误消息展示"""
     lines: list[str] = []
     for issue in issues:
         lines.append(f"{issue.field}: {issue.message}")
@@ -245,6 +271,7 @@ def format_validation_issues(issues: list[ValidationIssue]) -> str:
 
 
 def validation_issue_to_dict(issue: ValidationIssue) -> dict[str, object]:
+    """序列化单条问题为 dict（供 API 响应使用）"""
     return {
         "field": issue.field,
         "code": issue.code,

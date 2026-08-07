@@ -15,8 +15,8 @@ from modfetch.domain.config_models import ModLoader
 class BuildTarget:
     """单个构建目标：一个 (Minecraft 版本, 加载器) 组合"""
 
-    minecraft_version: str
-    loader: ModLoader
+    minecraft_version: str  #: Minecraft 版本号
+    loader: ModLoader  #: 加载器
 
     @property
     def dir_name(self) -> str:
@@ -28,22 +28,26 @@ class BuildTarget:
 class ArtifactCategory:
     """制品类别（决定目标子目录与 mrpack env 标记）"""
 
-    value: str  # "mods" / "resourcepacks" / "shaderpacks" / "file"
+    value: str  #: 类别值："mods" / "resourcepacks" / "shaderpacks" / "file"
 
     @classmethod
     def mods(cls) -> "ArtifactCategory":
+        """模组类别"""
         return cls("mods")
 
     @classmethod
     def resourcepacks(cls) -> "ArtifactCategory":
+        """资源包类别"""
         return cls("resourcepacks")
 
     @classmethod
     def shaderpacks(cls) -> "ArtifactCategory":
+        """光影包类别"""
         return cls("shaderpacks")
 
     @classmethod
     def file(cls) -> "ArtifactCategory":
+        """普通文件类别（不归入 mods/resourcepacks 子目录）"""
         return cls("file")
 
 
@@ -51,16 +55,17 @@ class ArtifactCategory:
 class ResolvedArtifact:
     """一个已解析的待下载制品"""
 
-    project_id: str
-    project_name: str
-    category: ArtifactCategory
-    filename: str
-    url: str
-    hashes: Dict[str, str]
-    destination: str  # 相对于版本目录的路径
-    target: BuildTarget
-    size: int = 0
-    origin: str = "catalog"  # "catalog"（平台解析）/ "extra_url"（额外URL）
+    project_id: str  #: 来源项目 ID
+    project_name: str  #: 来源项目名
+    category: ArtifactCategory  #: 制品类别
+    filename: str  #: 目标文件名
+    url: str  #: 下载地址
+    hashes: Dict[str, str]  #: 校验哈希，形如 {"sha1": "...", "sha512": "..."}
+    destination: str  #: 相对于版本目录的路径
+    target: BuildTarget  #: 所属构建目标
+    size: int = 0  #: 文件大小（字节）
+    origin: str = "catalog"  #: 来源："catalog"（平台解析）/ "extra_url"（额外URL）
+    #: mrpack env 标记，形如 {"client": "required", "server": "required"}
     environment: Dict[str, str] = field(
         default_factory=lambda: {"client": "required", "server": "required"}
     )
@@ -84,25 +89,27 @@ class ResolvedArtifact:
 class OutputSpec:
     """输出规格：为某个 target 生成何种格式的包"""
 
-    format: str  # "mrpack" / "zip"
-    target: BuildTarget
-    output_name: str  # 最终文件名（不含扩展名）
-    mrpack_mode: str = "download"  # 仅 mrpack 有效: "download" / "reference"
+    format: str  #: 输出格式："mrpack" / "zip"
+    target: BuildTarget  #: 目标构建目标
+    output_name: str  #: 最终文件名（不含扩展名）
+    mrpack_mode: str = "download"  #: 仅 mrpack 有效："download" / "reference"
 
 
 @dataclass(frozen=True)
 class BuildPlan:
     """构建计划：目标集合 + 制品集合 + 输出规格集合 + 包元数据"""
 
-    targets: Tuple[BuildTarget, ...]
-    artifacts: Tuple[ResolvedArtifact, ...]
-    outputs: Tuple[OutputSpec, ...]
-    metadata: Dict[str, str] = field(default_factory=dict)
+    targets: Tuple[BuildTarget, ...]  #: 全部构建目标
+    artifacts: Tuple[ResolvedArtifact, ...]  #: 全部待下载制品
+    outputs: Tuple[OutputSpec, ...]  #: 全部输出规格
+    metadata: Dict[str, str] = field(default_factory=dict)  #: 包元数据（名称/版本等）
 
     def artifacts_for(self, target: BuildTarget) -> Tuple[ResolvedArtifact, ...]:
+        """返回属于指定 target 的制品"""
         return tuple(a for a in self.artifacts if a.target == target)
 
     def outputs_for(self, target: BuildTarget) -> Tuple[OutputSpec, ...]:
+        """返回属于指定 target 的输出规格"""
         return tuple(o for o in self.outputs if o.target == target)
 
 
@@ -110,43 +117,44 @@ class BuildPlan:
 class OutputArtifact:
     """一个已生成的输出文件"""
 
-    path: str
-    format: str
-    target: BuildTarget
-    size: int
+    path: str  #: 输出文件绝对路径
+    format: str  #: 输出格式："mrpack" / "zip"
+    target: BuildTarget  #: 所属构建目标
+    size: int  #: 文件大小（字节）
 
 
 @dataclass(frozen=True)
 class BuildError:
     """结构化构建错误"""
 
-    code: str
-    message: str
-    target: BuildTarget
-    phase: str  # "resolve" / "download" / "package"
-    context: Dict[str, str] = field(default_factory=dict)
+    code: str  #: 错误码
+    message: str  #: 错误消息
+    target: BuildTarget  #: 出错的目标
+    phase: str  #: 出错阶段："resolve" / "download" / "package"
+    context: Dict[str, str] = field(default_factory=dict)  #: 附加上下文
 
 
 @dataclass(frozen=True)
 class BuildStats:
     """构建统计"""
 
-    total_artifacts: int
-    downloaded: int
-    skipped: int
-    failed: int
-    bytes_downloaded: int
+    total_artifacts: int  #: 制品总数
+    downloaded: int  #: 成功下载数
+    skipped: int  #: 跳过数
+    failed: int  #: 失败数
+    bytes_downloaded: int  #: 累计下载字节数
 
 
 @dataclass(frozen=True)
 class BuildResult:
     """构建结果：计划 + 输出 + 错误 + 统计"""
 
-    plan: BuildPlan
-    outputs: Tuple[OutputArtifact, ...]
-    errors: Tuple[BuildError, ...]
-    stats: BuildStats
+    plan: BuildPlan  #: 本次构建的计划
+    outputs: Tuple[OutputArtifact, ...]  #: 生成的输出文件
+    errors: Tuple[BuildError, ...]  #: 结构化错误列表
+    stats: BuildStats  #: 构建统计
 
     @property
     def success(self) -> bool:
+        """是否成功（无错误即成功）"""
         return not self.errors

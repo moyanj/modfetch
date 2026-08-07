@@ -19,7 +19,13 @@ EventBroadcaster = Callable[[Dict], Awaitable[None]]
 
 
 class JobEventSink:
-    """Web 作业状态事件接收器（实现 EventSink）"""
+    """Web 作业状态事件接收器（实现 EventSink）
+
+    将 BuildEvent 翻译为面向 WS 前端的事件流并维护统计计数器：
+    - 事件名保持旧前端契约（job_started/phase_change/stats_update...）
+    - 统计来自事件累积（total/completed/failed/bytes_downloaded），不另行计算
+    - 每个事件附带递增 sequence 供前端排序/去重
+    """
 
     def __init__(
         self,
@@ -39,20 +45,31 @@ class JobEventSink:
         self._bytes_downloaded = 0
 
     async def publish(self, event: BuildEvent) -> None:
+        """将单个 BuildEvent 翻译为 WS 事件并推送
+
+        翻译规则：
+        - BUILD_STARTED/COMPLETED/FAILED → job_*（作业生命周期）
+        - CONFIG_VALIDATED、PACKAGE_STARTED → phase_change（阶段映射）
+        - RESOLVE_* / DOWNLOAD_* → 逐条透传为 resolve_*/download_* 事件
+        - DOWNLOAD_COMPLETED/FAILED 累积计数并触发 stats_update 快照
+        """
         self._sequence += 1
         et = event.event_type
         data = event.payload
 
         if et == EventType.BUILD_STARTED:
+            # 作业生命周期起点: job_started，附作业 ID 与配置摘要
             payload: Dict = {"job_id": self._job_id}
             if self._config_summary is not None:
                 payload["config_summary"] = self._config_summary
             await self._emit("job_started", payload)
 
         elif et == EventType.CONFIG_VALIDATED:
+            # 阶段映射: 配置校验通过 → 进入解析（resolve）阶段
             await self._emit("phase_change", {"phase": "resolve"})
 
         elif et == EventType.PLAN_CREATED:
+            # 总进度以计划制品数为准，作为 stats_update 的 total
             self._total = int(data.get("artifacts", 0))
             await self._emit_stats()
 
@@ -89,6 +106,7 @@ class JobEventSink:
             )
 
         elif et == EventType.DOWNLOAD_PROGRESS:
+            # 由字节数计算进度百分比（total 为 0 时按 0 处理，避免除零）
             downloaded = int(data.get("bytes_downloaded", 0))
             total = int(data.get("bytes_total", 0))
             await self._emit(
@@ -102,6 +120,7 @@ class JobEventSink:
             )
 
         elif et == EventType.DOWNLOAD_COMPLETED:
+            # 状态折叠: 完成计数 +1、累计字节，随后广播 stats_update 快照
             self._completed += 1
             self._bytes_downloaded += int(data.get("size", 0))
             await self._emit(
@@ -114,6 +133,7 @@ class JobEventSink:
             await self._emit_stats()
 
         elif et == EventType.DOWNLOAD_FAILED:
+            # 状态折叠: 失败计数 +1，错误统一映射为 E300
             self._failed += 1
             await self._emit(
                 "download_failed",
@@ -128,6 +148,7 @@ class JobEventSink:
             await self._emit_stats()
 
         elif et == EventType.PACKAGE_STARTED:
+            # 阶段映射: 打包开始 → 阶段切换为 package，同时透传 package_start
             await self._emit("phase_change", {"phase": "package"})
             await self._emit(
                 "package_start",
@@ -138,6 +159,7 @@ class JobEventSink:
             )
 
         elif et == EventType.PACKAGE_COMPLETED:
+            # 从完整路径提取文件名用于前端展示
             path = data.get("path", "")
             filename = path.rsplit("/", 1)[-1] if path else ""
             await self._emit(
@@ -161,6 +183,7 @@ class JobEventSink:
             )
 
         elif et == EventType.BUILD_COMPLETED:
+            # 生命周期终点: job_complete，输出转 JobResultItem 兼容结构
             outputs = data.get("outputs", [])
             await self._emit(
                 "job_complete",
@@ -178,7 +201,7 @@ class JobEventSink:
             if error:
                 await self._emit("job_failed", {"error": error})
             else:
-                # 汇总错误列表为单一 job_failed（取首个错误的 code）
+                # 状态折叠: 无单一 error 时取错误列表首个的 code 作为主错误
                 first = errors[0] if errors else {}
                 await self._emit(
                     "job_failed",
@@ -198,11 +221,14 @@ class JobEventSink:
 
     @staticmethod
     def _output_to_result(output: dict) -> dict:
-        """统一输出 → JobResultItem 兼容格式"""
+        """统一输出 → JobResultItem 兼容格式
+
+        将 OutputArtifact 形式的 dict 转为 WS 客户端期望的字段结构。
+        """
         path = output.get("path", "")
         filename = path.rsplit("/", 1)[-1] if path else ""
         target = output.get("target", "")
-        # target 形如 "1.21.1-fabric"
+        # target 形如 "1.21.1-fabric"，拆分出 MC 版本与加载器
         mc_version, _, loader = target.rpartition("-")
         return {
             "filename": filename,
@@ -214,6 +240,7 @@ class JobEventSink:
         }
 
     async def _emit(self, name: str, data: dict) -> None:
+        # 统一事件信封: 事件名 + {job_id, sequence, ...data}
         await self._broadcaster(
             {
                 "event": name,
@@ -226,7 +253,11 @@ class JobEventSink:
         )
 
     async def _emit_stats(self) -> None:
-        """广播统计快照（字段统一: total/completed/failed/bytes_downloaded）"""
+        """广播统计快照（字段统一: total/completed/failed/bytes_downloaded）
+
+        在 PLAN_CREATED 与每次 DOWNLOAD_COMPLETED/FAILED 后触发；
+        skipped 恒为 0（当前无跳过语义）。
+        """
         await self._emit(
             "stats_update",
             {

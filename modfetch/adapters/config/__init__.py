@@ -1,4 +1,10 @@
-"""配置来源适配器"""
+"""配置来源适配器
+
+ConfigSource 端口的本地文件实现（TOML/YAML/JSON）与继承解析入口：
+- TomlConfigSource/YamlConfigSource/JsonConfigSource: 按后缀解析本地配置
+- get_config_source: 按文件后缀选择对应来源
+- resolve_inheritance / load_with_inheritance: 解析 "from" 继承引用并合并
+"""
 
 from pathlib import Path
 

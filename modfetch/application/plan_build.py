@@ -63,7 +63,12 @@ class PlanReport:
 
 
 class PlanBuild:
-    """构建计划生成用例"""
+    """构建计划生成用例
+
+    将配置展开为不可变 BuildPlan: version × loader 展开 → 逐 target
+    解析模组/依赖/资源包/光影包/extra_urls → 制品与输出规格集合。
+    不做任何下载与打包（由 ExecuteBuild 承担）。
+    """
 
     def __init__(
         self,
@@ -80,6 +85,7 @@ class PlanBuild:
 
     @property
     def catalog(self) -> CatalogPort:
+        """对外的目录端口（供远程校验等复用同一 catalog 实例）"""
         return self._catalog
 
     async def execute(
@@ -89,6 +95,18 @@ class PlanBuild:
         event_sink: Optional[EventSink] = None,
         job_id: str = "",
     ) -> Tuple[BuildPlan, PlanReport]:
+        """展开配置并生成构建计划
+
+        Args:
+            config: 用户配置
+            features: 启用的功能标签；省略时使用 config.features
+            event_sink: 解析阶段事件接收器（可选）
+            job_id: 作业标识（事件关联用）
+
+        Returns:
+            (BuildPlan, PlanReport): 不可变构建计划与解析统计副产物
+            （被跳过条目、依赖解析诊断等）。
+        """
         features = features if features is not None else config.features
         self._sink = event_sink
         self._job_id = job_id
@@ -121,6 +139,7 @@ class PlanBuild:
     # -- 展开 -------------------------------------------------------------
 
     def _expand_targets(self, config: ModFetchConfig) -> List[BuildTarget]:
+        """展开 version × loader 为全部构建目标（笛卡尔积）"""
         return [
             BuildTarget(minecraft_version=version, loader=loader)
             for version in config.minecraft.version
@@ -130,6 +149,11 @@ class PlanBuild:
     def _make_output_specs(
         self, target: BuildTarget, config: ModFetchConfig
     ) -> List[OutputSpec]:
+        """为单个 target 生成输出规格（mrpack/zip）
+
+        mrpack 多模式时以 -{mode} 后缀区分同名输出；zip 使用独立命名，
+        避免与 mrpack 产物冲突。
+        """
         specs: List[OutputSpec] = []
         metadata = config.metadata
         version = target.minecraft_version
@@ -174,6 +198,14 @@ class PlanBuild:
         config: ModFetchConfig,
         features: List[str],
     ) -> Tuple[List[ResolvedArtifact], List[str]]:
+        """解析单个 target 的全部制品
+
+        依次处理模组（含递归依赖）、资源包、光影包与 extra_urls，
+        返回解析成功的制品列表；被过滤或解析失败的条目记入 skipped。
+
+        Returns:
+            (artifacts, skipped): 制品列表与跳过条目标识列表
+        """
         version = target.minecraft_version
         loader = target.loader
         artifacts: List[ResolvedArtifact] = []
@@ -258,6 +290,7 @@ class PlanBuild:
                 version=version,
                 extra_data={"dependencies": graph.nodes},
             )
+            # 依赖制品与主模组共用同一 processed 去重集合，避免同项目重复打包
             for dep_info, _, dep_file in graph.nodes:
                 if dep_info.id in processed:
                     continue
@@ -308,6 +341,7 @@ class PlanBuild:
         category: ArtifactCategory,
         env: Dict[str, str],
     ) -> ResolvedArtifact:
+        """由解析结果构造标准制品（目录=category 名，含哈希与环境标记）"""
         filename = file_info["filename"]
         return ResolvedArtifact(
             project_id=project_info.id,
@@ -326,6 +360,7 @@ class PlanBuild:
     def _make_extra_url_artifact(
         self, target: BuildTarget, extra: ExtraUrl
     ) -> ResolvedArtifact:
+        """构造 extra_url 制品（非 catalog 来源，可带 sha1 校验）"""
         # type=file 放版本根目录；其他类型进入对应子目录
         # （沿用旧行为: pack→packs 复数化，MOD→"mod" 单数）
         url_basename = extra.url.rstrip("/").split("/")[-1]
@@ -357,9 +392,11 @@ class PlanBuild:
         version: str,
         features: List[str],
     ) -> bool:
+        """按版本与功能标签过滤条目（委托 VersionMatcher）"""
         return self._version_matcher.should_include(entry, version, features)
 
     async def _emit_hook(self, name: str, **kwargs: Any) -> None:
+        """触发解析阶段插件钩子（未注入 hook 时为空操作）"""
         if self._hook is not None:
             await self._hook(name, **kwargs)
 

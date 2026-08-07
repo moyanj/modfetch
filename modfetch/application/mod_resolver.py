@@ -35,6 +35,9 @@ class ModResolver:
 
         Returns:
             tuple: (project_info, version_info, file_info) 或 None
+
+        过程: 提取标识与固定版本 → 查询项目（带缓存）→ 查询匹配版本；
+        返回 None 表示项目不存在或当前 MC 版本/加载器下无匹配版本。
         """
         # 提取模组标识和版本固定信息
         if isinstance(mod, str):
@@ -77,7 +80,11 @@ class ModResolver:
         mc_version: str,
         mod_loader: str,
     ) -> List[tuple[ProjectInfo, VersionInfo, dict]]:
-        """批量解析模组"""
+        """批量解析模组
+
+        串行逐条 resolve 以复用项目信息缓存（避免重复网络请求）；
+        无法解析的条目不进入结果列表（调用方可据长度感知缺失）。
+        """
         results = []
         for mod in mods:
             result = await self.resolve(mod, mc_version, mod_loader)
