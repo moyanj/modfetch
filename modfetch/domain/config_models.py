@@ -176,6 +176,7 @@ class ModFetchConfig:
     max_concurrent: int = 5
     max_retries: int = 3
     retry_delay: float = 1.0  # 初始重试延迟（秒）
+    verify_ssl: bool = True
     features: List[str] = field(default_factory=list)
     parent_configs: List[ParentConfig] = field(default_factory=list)
     plugins: PluginConfig = field(default_factory=PluginConfig)
@@ -380,9 +381,7 @@ class ModFetchConfig:
                 "resourcepacks": self._serialize_mod_entries(
                     self.minecraft.resourcepacks
                 ),
-                "shaderpacks": self._serialize_mod_entries(
-                    self.minecraft.shaderpacks
-                ),
+                "shaderpacks": self._serialize_mod_entries(self.minecraft.shaderpacks),
                 "extra_urls": [
                     {
                         "url": url.url,

@@ -160,6 +160,13 @@ class ValidationError(ModFetchError):
         return "E500"
 
 
+class PluginError(ModFetchError):
+    """插件系统相关错误（Python/Lua 插件加载与执行）"""
+
+    def _get_default_code(self) -> str:
+        return "E600"
+
+
 class ModrinthError(APIError):
     """Modrinth API 错误（向后兼容）
 
@@ -195,5 +202,6 @@ __all__ = [
     "MrpackError",
     "ZipError",
     "ValidationError",
+    "PluginError",
     "ModrinthError",
 ]

@@ -7,7 +7,9 @@ CLI 模块（适配层）
 
 import asyncio
 from pathlib import Path
+from signal import raise_signal
 from typing import Optional
+from urllib.parse import urlparse
 
 import click
 from loguru import logger
@@ -17,8 +19,9 @@ from modfetch.adapters.modrinth import ModrinthClient
 from modfetch.application.config_service import ConfigService
 from modfetch.application.validation import format_validation_issues
 from modfetch.composition import create_build_service
-from modfetch.domain.errors import ModFetchError
+from modfetch.domain.errors import ModFetchError, PluginError
 from modfetch.logger import setup_logger
+from modfetch.plugins.lua_loader import LuaPluginLoader
 
 
 def load_config(config_path: str) -> dict:
@@ -32,6 +35,13 @@ def load_config(config_path: str) -> dict:
         return dict(get_config_source(path).load(path))
     except ValueError as e:
         raise click.ClickException(str(e)) from e
+
+
+def _is_lua_plugin(path: str) -> bool:
+    """判断插件路径是否为 Lua 插件（支持本地路径与 URL）"""
+    parsed = urlparse(path)
+    target = parsed.path if parsed.scheme else path
+    return Path(target).suffix == ".lua"
 
 
 async def run_async(
@@ -48,107 +58,119 @@ async def run_async(
     # 初始化插件系统
     plugin_manager = PluginManager()
     plugin_loader = PluginLoader(plugin_manager)
-
-    # 加载插件目录
-    if plugin_dir:
-        plugin_paths = plugin_loader.scan_directory(plugin_dir)
-        for path in plugin_paths:
-            try:
-                await plugin_loader.load_from_path(path)
-            except Exception as e:
-                logger.warning(f"加载插件 {path} 失败: {e}")
-
-    # 加载指定插件
-    for plugin_path in plugins:
-        try:
-            await plugin_loader.load_from_path(plugin_path)
-        except Exception as e:
-            logger.error(f"加载插件 {plugin_path} 失败: {e}")
-
-    # 列出插件
-    if list_plugins:
-        loaded_plugins = plugin_manager.list_plugins()
-        if loaded_plugins:
-            click.echo("已加载的插件:")
-            for p in loaded_plugins:
-                status = "✓" if p["enabled"] else "✗"
-                click.echo(
-                    f"  [{status}] {p['name']} v{p['version']} - {p['description']}"
-                )
-        else:
-            click.echo("没有加载任何插件")
-        return
+    lua_plugin_manager = LuaPluginLoader(plugin_manager)
+    await lua_plugin_manager.initialize()
 
     try:
-        # 加载配置（统一配置边界: 解析 → 本地校验）
-        config_service = ConfigService()
-        config = config_service.parse(load_config(config_path))
-        config_service.validate_local(config)
-        config.features = features
-
-        # 从配置加载插件（Nuitka 环境使用）
-        if config.plugins.enabled:
-            logger.info(f"从配置加载插件: {config.plugins.enabled}")
-            for plugin_name in config.plugins.enabled:
+        # 加载插件目录
+        if plugin_dir:
+            plugin_paths = plugin_loader.scan_directory(
+                plugin_dir
+            ) + lua_plugin_manager.scan_directory(plugin_dir)
+            for path in plugin_paths:
                 try:
-                    # 尝试作为内置插件加载
-                    await plugin_loader.load_from_module(
-                        f"modfetch.plugins.builtin.{plugin_name}"
+                    if path.endswith(".lua"):
+                        await lua_plugin_manager.load_from_path(path)
+                    elif path.endswith(".py"):
+                        await plugin_loader.load_from_path(path)
+                    else:
+                        raise PluginError("WTF？内存损坏？这是不可能被扫描的")
+                except Exception as e:
+                    logger.warning(f"加载插件 {path} 失败: {e}")
+
+        # 加载指定插件（按语言分发: .lua → Lua loader，其余 → Python loader）
+        for plugin_path in plugins:
+            try:
+                if _is_lua_plugin(plugin_path):
+                    await lua_plugin_manager.load_from_path(plugin_path)
+                else:
+                    await plugin_loader.load_from_path(plugin_path)
+            except Exception as e:
+                logger.error(f"加载插件 {plugin_path} 失败: {e}")
+
+        # 列出插件
+        if list_plugins:
+            loaded_plugins = plugin_manager.list_plugins()
+            if loaded_plugins:
+                click.echo("已加载的插件:")
+                for p in loaded_plugins:
+                    status = "✓" if p["enabled"] else "✗"
+                    click.echo(
+                        f"  [{status}] {p['name']} v{p['version']} - {p['description']}"
                     )
-                except Exception:
-                    # 尝试作为第三方插件加载
-                    try:
-                        await plugin_loader.load_from_module(plugin_name)
-                    except Exception as e:
-                        logger.warning(f"从配置加载插件 {plugin_name} 失败: {e}")
-
-        # 远程校验
-        async with ModrinthClient() as client:
-            report = await config_service.validate_remote(config, client)
-            if not report.is_valid:
-                raise click.ClickException(
-                    format_validation_issues(report.issues)
-                )
-
-        if dry_run:
-            logger.info("[干运行模式] 配置验证通过")
-            logger.info(f"  Minecraft 版本: {config.minecraft.version}")
-
-            loaders = config.minecraft.loaders()
-            loader_str = ", ".join([loader.value for loader in loaders])
-            logger.info(f"  模组加载器: {loader_str}")
-            logger.info(f"  模组数量: {len(config.minecraft.mods)}")
-            logger.info(f"  资源包数量: {len(config.minecraft.resourcepacks)}")
-            logger.info(f"  光影包数量: {len(config.minecraft.shaderpacks)}")
+            else:
+                click.echo("没有加载任何插件")
             return
 
-        # 通过应用服务执行构建
-        service = create_build_service(
-            max_concurrent=config.max_concurrent,
-            max_retries=config.max_retries,
-            retry_delay=config.retry_delay,
-        )
-        result = await service.execute(config, job_id="cli")
+        try:
+            # 加载配置（统一配置边界: 解析 → 本地校验）
+            config_service = ConfigService()
+            config = config_service.parse(load_config(config_path))
+            config_service.validate_local(config)
+            config.features = features
 
-        if result.errors:
-            for error in result.errors:
-                logger.error(
-                    f"[{error.phase}] {error.target.dir_name}: {error.message}"
-                )
-            raise click.ClickException(
-                f"构建失败: {len(result.errors)} 个错误"
+            # 从配置加载插件（Nuitka 环境使用）
+            if config.plugins.enabled:
+                logger.info(f"从配置加载插件: {config.plugins.enabled}")
+                for plugin_name in config.plugins.enabled:
+                    try:
+                        # 尝试作为内置插件加载
+                        await plugin_loader.load_from_module(
+                            f"modfetch.plugins.builtin.{plugin_name}"
+                        )
+                    except Exception:
+                        # 尝试作为第三方插件加载
+                        try:
+                            await plugin_loader.load_from_module(plugin_name)
+                        except Exception as e:
+                            logger.warning(f"从配置加载插件 {plugin_name} 失败: {e}")
+
+            # 远程校验
+            async with ModrinthClient() as client:
+                report = await config_service.validate_remote(config, client)
+                if not report.is_valid:
+                    raise click.ClickException(format_validation_issues(report.issues))
+
+            if dry_run:
+                logger.info("[干运行模式] 配置验证通过")
+                logger.info(f"  Minecraft 版本: {config.minecraft.version}")
+
+                loaders = config.minecraft.loaders()
+                loader_str = ", ".join([loader.value for loader in loaders])
+                logger.info(f"  模组加载器: {loader_str}")
+                logger.info(f"  模组数量: {len(config.minecraft.mods)}")
+                logger.info(f"  资源包数量: {len(config.minecraft.resourcepacks)}")
+                logger.info(f"  光影包数量: {len(config.minecraft.shaderpacks)}")
+                return
+
+            # 通过应用服务执行构建
+            service = create_build_service(
+                max_concurrent=config.max_concurrent,
+                max_retries=config.max_retries,
+                retry_delay=config.retry_delay,
+                verify_ssl=config.verify_ssl,
             )
+            result = await service.execute(config, job_id="cli")
 
-        logger.success(f"完成! 输出 {len(result.outputs)} 个文件")
+            if result.errors:
+                for error in result.errors:
+                    logger.error(
+                        f"[{error.phase}] {error.target.dir_name}: {error.message}"
+                    )
+                raise click.ClickException(f"构建失败: {len(result.errors)} 个错误")
 
-    except ModFetchError as e:
-        logger.error(f"配置错误: {e}")
-        raise click.ClickException(str(e))
-    except click.ClickException:
-        raise
-    except Exception as e:
-        logger.exception(f"运行时错误: {e}")
-        raise click.ClickException(f"运行时错误: {e}")
+            logger.success(f"完成! 输出 {len(result.outputs)} 个文件")
+
+        except ModFetchError as e:
+            logger.error(f"配置错误: {e}")
+            raise click.ClickException(str(e))
+        except click.ClickException:
+            raise
+        except Exception as e:
+            logger.exception(f"运行时错误: {e}")
+            raise click.ClickException(f"运行时错误: {e}")
+    finally:
+        await lua_plugin_manager.shutdown()
 
 
 @click.command()
