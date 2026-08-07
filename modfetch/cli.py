@@ -1,7 +1,8 @@
 """
-CLI 模块
+CLI 模块（适配层）
 
-命令行接口实现。
+职责: 参数解析、配置加载、依赖组装、错误展示、退出码。
+构建编排统一走 BuildApplicationService。
 """
 
 import asyncio
@@ -15,7 +16,7 @@ from modfetch.adapters.config import get_config_source
 from modfetch.adapters.modrinth import ModrinthClient
 from modfetch.application.config_service import ConfigService
 from modfetch.application.validation import format_validation_issues
-from modfetch.orchestrator import ModFetchOrchestrator
+from modfetch.composition import create_build_service
 from modfetch.exceptions import ModFetchError
 from modfetch.logger import setup_logger
 
@@ -79,16 +80,11 @@ async def run_async(
         return
 
     try:
-        # 加载配置（统一配置边界: 解析 → 本地校验 → 远程校验）
+        # 加载配置（统一配置边界: 解析 → 本地校验）
         config_service = ConfigService()
         config = config_service.parse(load_config(config_path))
         config_service.validate_local(config)
         config.features = features
-
-        async with ModrinthClient() as client:
-            report = await config_service.validate_remote(config, client)
-            if not report.is_valid:
-                raise click.ClickException(format_validation_issues(report.issues))
 
         # 从配置加载插件（Nuitka 环境使用）
         if config.plugins.enabled:
@@ -106,35 +102,50 @@ async def run_async(
                     except Exception as e:
                         logger.warning(f"从配置加载插件 {plugin_name} 失败: {e}")
 
+        # 远程校验
+        async with ModrinthClient() as client:
+            report = await config_service.validate_remote(config, client)
+            if not report.is_valid:
+                raise click.ClickException(
+                    format_validation_issues(report.issues)
+                )
+
         if dry_run:
             logger.info("[干运行模式] 配置验证通过")
             logger.info(f"  Minecraft 版本: {config.minecraft.version}")
 
-            loaders = (
-                config.minecraft.mod_loader
-                if isinstance(config.minecraft.mod_loader, list)
-                else [config.minecraft.mod_loader]
-            )
-            loader_str = ", ".join([l.value for l in loaders])
+            loaders = config.minecraft.loaders()
+            loader_str = ", ".join([loader.value for loader in loaders])
             logger.info(f"  模组加载器: {loader_str}")
             logger.info(f"  模组数量: {len(config.minecraft.mods)}")
             logger.info(f"  资源包数量: {len(config.minecraft.resourcepacks)}")
             logger.info(f"  光影包数量: {len(config.minecraft.shaderpacks)}")
             return
 
-        # 运行协调器（传入插件管理器）
-        orchestrator = ModFetchOrchestrator(config, plugin_manager)
-        await orchestrator.run()
+        # 通过应用服务执行构建
+        service = create_build_service(
+            max_concurrent=config.max_concurrent,
+            max_retries=config.max_retries,
+            retry_delay=config.retry_delay,
+        )
+        result = await service.execute(config, job_id="cli")
 
-        stats = orchestrator.get_stats()
-        logger.success(f"完成! 处理了 {stats['processed_mods']} 个模组")
+        if result.errors:
+            for error in result.errors:
+                logger.error(
+                    f"[{error.phase}] {error.target.dir_name}: {error.message}"
+                )
+            raise click.ClickException(
+                f"构建失败: {len(result.errors)} 个错误"
+            )
 
-        if stats["skipped"]:
-            logger.warning(f"跳过了 {len(stats['skipped'])} 个项目")
+        logger.success(f"完成! 输出 {len(result.outputs)} 个文件")
 
     except ModFetchError as e:
         logger.error(f"配置错误: {e}")
         raise click.ClickException(str(e))
+    except click.ClickException:
+        raise
     except Exception as e:
         logger.exception(f"运行时错误: {e}")
         raise click.ClickException(f"运行时错误: {e}")

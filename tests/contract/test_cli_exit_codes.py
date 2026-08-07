@@ -99,10 +99,6 @@ class TestExitCodes:
         result = runner.invoke(main, [config_file(VALID_CONFIG), "--dry-run"])
         assert result.exit_code == 0, result.output
 
-    @pytest.mark.xfail(
-        reason="bug: 队列 worker 吞掉下载失败异常，orchestrator 正常返回导致 exit 0",
-        strict=False,
-    )
     def test_cli_download_failure_nonzero(
         self, runner, config_file, monkeypatch, mock_modrinth, tmp_path
     ):
