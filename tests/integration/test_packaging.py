@@ -5,9 +5,9 @@ import zipfile
 
 import pytest
 
-from modfetch.models import ModLoader
-from modfetch.packager.mrpack import MrpackBuilder
-from modfetch.packager.zip import ZipBuilder
+from modfetch.domain import ModLoader
+from modfetch.adapters.packaging.mrpack_builder import MrpackBuilder
+from modfetch.adapters.packaging.zip_builder import ZipBuilder
 
 METADATA = {"name": "TestPack", "version": "1.0.0", "description": "test"}
 

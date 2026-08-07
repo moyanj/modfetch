@@ -13,12 +13,9 @@ modfetch/
 ├── ports/          # Dependency interfaces (Protocol)
 ├── application/    # Use cases: build_service / plan_build / execute_build
 ├── adapters/       # modrinth/ download/ packaging/ events/ config/ jobs/
-├── services/       # Legacy resolvers (ModResolver/VersionMatcher/MrpackResolver)
+├── application/    # mod_resolver/ version_matcher 也在此
 ├── plugins/        # Plugin hooks (Python/Lua)
 ├── server/         # FastAPI thin adapter (routes/ws/schemas)
-├── models/         # COMPAT SHIM → domain
-├── download/       # COMPAT SHIM → adapters/download
-├── exceptions.py   # COMPAT SHIM → domain.errors
 ├── composition.py  # DI composition root (create_build_service)
 └── cli.py          # CLI adapter
 ```
@@ -42,5 +39,3 @@ modfetch/
 
 ## ANTI-PATTERNS
 - No ruff linting configured
-- Compat shims (`modfetch.models` etc.) are deprecated — import from
-  `modfetch.domain` / `modfetch.adapters` in new code

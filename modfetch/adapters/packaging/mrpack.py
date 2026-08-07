@@ -19,9 +19,9 @@ from modfetch.domain.build_plan import (
     OutputArtifact,
     OutputSpec,
 )
+from modfetch.adapters.packaging.mrpack_builder import MrpackBuilder
 from modfetch.domain.config_models import ModLoader, MrpackMode
 from modfetch.domain.errors import PackagerError
-from modfetch.packager.mrpack import MrpackBuilder
 
 #: 加载器版本解析回调: async (loader, mc_version) -> version_str
 LoaderVersionResolver = Callable[[ModLoader, str], Awaitable[Optional[str]]]

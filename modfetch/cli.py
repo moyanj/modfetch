@@ -17,7 +17,7 @@ from modfetch.adapters.modrinth import ModrinthClient
 from modfetch.application.config_service import ConfigService
 from modfetch.application.validation import format_validation_issues
 from modfetch.composition import create_build_service
-from modfetch.exceptions import ModFetchError
+from modfetch.domain.errors import ModFetchError
 from modfetch.logger import setup_logger
 
 

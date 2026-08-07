@@ -7,7 +7,7 @@ import pytest
 import toml
 import yaml
 
-from modfetch.models import (
+from modfetch.domain import (
     FileType,
     ModEntry,
     ModFetchConfig,

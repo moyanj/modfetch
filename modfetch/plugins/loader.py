@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 import aiohttp
 
 from modfetch.plugins.base import ModFetchPlugin, PluginManager
-from modfetch.exceptions import ModFetchError
+from modfetch.domain.errors import ModFetchError
 
 try:
     from loguru import logger

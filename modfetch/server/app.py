@@ -19,8 +19,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
+from modfetch.adapters.jobs import JobApplicationService
 from modfetch.adapters.modrinth import ModrinthClient
-from modfetch.server.jobs import JobManager
 from modfetch.server.routes import router as api_router
 from modfetch.server.ws import router as ws_router
 
@@ -48,7 +48,7 @@ def create_app() -> FastAPI:
     )
 
     # 注入 JobManager 与共享 catalog
-    app.state.job_manager = JobManager()
+    app.state.job_manager = JobApplicationService()
     app.state.catalog = ModrinthClient()
 
     # 注册 REST 路由

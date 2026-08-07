@@ -14,8 +14,8 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from modfetch.models import ProjectInfo, VersionInfo, ProjectType
-from modfetch.services.api_client import ModrinthClient
+from modfetch.domain import ProjectInfo, ProjectType, VersionInfo
+from modfetch.adapters.modrinth import ModrinthClient
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

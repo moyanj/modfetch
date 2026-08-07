@@ -24,10 +24,6 @@ Architecture: hexagonal (domain → ports → application → adapters). CLI and
 │   │   └── jobs/      # Web job management (in-memory)
 │   ├── plugins/       # Plugin system (Python/Lua)
 │   ├── server/        # Web adapter (thin FastAPI routes)
-│   ├── services/      # Legacy resolvers (used by application layer)
-│   ├── models/        # COMPAT SHIM → domain
-│   ├── download/      # COMPAT SHIM → adapters/download
-│   ├── exceptions.py  # COMPAT SHIM → domain.errors
 │   ├── composition.py # DI composition root
 │   └── cli.py         # CLI adapter
 ├── tests/             # unit/ integration/ contract/
@@ -41,6 +37,7 @@ Architecture: hexagonal (domain → ports → application → adapters). CLI and
 | Config parse/validate | `modfetch/application/config_service.py` |
 | Plan generation (expand×resolve) | `modfetch/application/plan_build.py` |
 | Dependency graph | `modfetch/application/dependency_resolver.py` |
+| Mod resolver | `modfetch/application/mod_resolver.py` |
 | Modrinth HTTP | `modfetch/adapters/modrinth/client.py` |
 | Download execution | `modfetch/adapters/download/executor.py` |
 | Packaging | `modfetch/adapters/packaging/` |
@@ -59,7 +56,6 @@ python build.py        # Nuitka → executables
 - Python: `loguru` for logging, `aiohttp` for async HTTP (adapters only)
 - `domain/` must stay free of aiohttp/fastapi/click/loguru imports (AST-checked)
 - Errors flow as values (`DownloadResult`/`BuildResult.errors`), never swallowed
-- Backward-compat shims re-export from new locations; deprecated
 - Entry: `modfetch/__main__.py` → `modfetch/__main__:cli_main`
 
 ## NOTES

@@ -38,11 +38,11 @@ from modfetch.domain.config_models import (
     MrpackMode,
     OutputFormat,
 )
+from modfetch.application.mod_resolver import ModResolver
+from modfetch.application.version_matcher import VersionMatcher
 from modfetch.domain.events import BuildEvent, EventType
 from modfetch.ports.catalog import CatalogPort
 from modfetch.ports.event_sink import EventSink
-from modfetch.services.mod_resolver import ModResolver
-from modfetch.services.version_matcher import VersionMatcher
 
 #: 解析阶段事件回调（插件 Hook 过渡桥）
 #: async hook(name, *, version, mod_entry=None, extra_data=None)

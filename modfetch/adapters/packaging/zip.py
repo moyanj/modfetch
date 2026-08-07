@@ -9,8 +9,8 @@ from modfetch.domain.build_plan import (
     OutputArtifact,
     OutputSpec,
 )
+from modfetch.adapters.packaging.zip_builder import ZipBuilder
 from modfetch.domain.errors import PackagerError
-from modfetch.packager.zip import ZipBuilder
 
 
 class ZipPackager:

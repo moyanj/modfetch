@@ -2,7 +2,7 @@
 
 import pytest
 
-from modfetch.models import (
+from modfetch.domain import (
     ExtraUrl,
     MinecraftConfig,
     ModEntry,

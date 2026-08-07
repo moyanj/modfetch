@@ -17,7 +17,7 @@ except ImportError:
 
     logger = logging.getLogger("modfetch")
 
-from modfetch.models import ModFetchConfig, ModEntry
+from modfetch.domain.config_models import ModEntry, ModFetchConfig
 
 
 class HookType(Enum):

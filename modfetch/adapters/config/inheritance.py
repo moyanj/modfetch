@@ -51,7 +51,9 @@ async def resolve_inheritance(
 
                 if fmt == "mrpack":
                     # 处理 mrpack 继承
-                    from modfetch.services.mrpack_resolver import MrpackResolver
+                    from modfetch.adapters.config.mrpack_resolver import (
+                        MrpackResolver,
+                    )
 
                     content_bytes = await response.read()
                     parent_dict = await MrpackResolver.resolve_to_dict(content_bytes)

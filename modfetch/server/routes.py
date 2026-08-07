@@ -15,10 +15,10 @@ from loguru import logger
 from modfetch.adapters.modrinth import build_modrinth_facets
 from modfetch.application.config_service import ConfigService
 from modfetch.application.validation import validation_issue_to_dict
-from modfetch.exceptions import ModFetchError
+from modfetch.domain.errors import ModFetchError
 from modfetch.ports.catalog import CatalogPort
 from modfetch.server import schemas
-from modfetch.server.jobs import JobManager
+from modfetch.adapters.jobs import JobManager
 
 router = APIRouter(prefix="/api")
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
 
-from modfetch.server.jobs import JobManager
+from modfetch.adapters.jobs import JobManager
 
 router = APIRouter()
 

@@ -6,7 +6,7 @@
 
 from datetime import datetime, timezone
 
-from modfetch.server.jobs import (
+from modfetch.adapters.jobs import (
     JobErrorItem,
     JobManager,
     JobResultItem,

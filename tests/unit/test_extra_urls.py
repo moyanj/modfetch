@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import toml
 
-from modfetch.models import ExtraUrl, FileType, ModFetchConfig
+from modfetch.domain import ExtraUrl, FileType, ModFetchConfig
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "configs"
 

@@ -4,7 +4,7 @@ import pytest
 
 from modfetch.adapters.events import JobEventSink
 from modfetch.domain.events import BuildEvent, EventType
-from modfetch.server.jobs import JobState, JobStats
+from modfetch.adapters.jobs import JobState, JobStats
 
 
 class Collector:

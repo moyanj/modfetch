@@ -18,8 +18,8 @@ from modfetch.plugins.lua_runtime import (
     LuaPluginWrapper,
     LuaRuntimeManager,
 )
-from modfetch.services import ModrinthClient
-from modfetch.models import ModFetchConfig
+from modfetch.adapters.modrinth import ModrinthClient
+from modfetch.domain.config_models import ModFetchConfig
 
 try:
     from loguru import logger

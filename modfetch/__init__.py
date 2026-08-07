@@ -10,7 +10,7 @@ from modfetch.logger import setup_logger
 setup_logger()
 
 # 导出主要组件
-from modfetch.models import (
+from modfetch.domain import (
     ModFetchConfig,
     MinecraftConfig,
     OutputConfig,
@@ -18,7 +18,7 @@ from modfetch.models import (
 )
 from modfetch.application.build_service import BuildApplicationService
 from modfetch.composition import create_build_service
-from modfetch.exceptions import ModFetchError
+from modfetch.domain.errors import ModFetchError
 from modfetch.logger import logger
 
 __all__ = [

@@ -6,7 +6,7 @@
 
 import pytest
 
-from modfetch.server.jobs import JobState, JobStats
+from modfetch.adapters.jobs import JobState, JobStats
 
 
 def _make_job() -> JobState:

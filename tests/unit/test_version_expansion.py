@@ -9,7 +9,7 @@ from itertools import product
 
 import pytest
 
-from modfetch.models import ModFetchConfig, ModLoader
+from modfetch.domain import ModFetchConfig, ModLoader
 
 
 def _expand(config: ModFetchConfig) -> list[tuple[str, ModLoader]]:

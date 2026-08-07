@@ -1,21 +1,22 @@
 """
-模组解析服务
+模组解析用例（自 services.mod_resolver 迁移）
 
 处理模组 ID/slug 解析、版本匹配，返回标准化的模组信息。
+仅依赖 CatalogPort，不耦合具体平台客户端。
 """
 
-from typing import Optional, Union, List
+from typing import List, Optional, Union
 
-from modfetch.models import ModEntry, ProjectInfo, VersionInfo
-from modfetch.services.api_client import ModrinthClient
-from modfetch.exceptions import APIError
+from modfetch.domain.config_models import ModEntry
+from modfetch.domain.models import ProjectInfo, VersionInfo
+from modfetch.ports.catalog import CatalogPort
 
 
 class ModResolver:
-    """模组解析器"""
+    """模组解析器（带项目信息缓存）"""
 
-    def __init__(self, client: ModrinthClient):
-        self.client = client
+    def __init__(self, catalog: CatalogPort):
+        self.catalog = catalog
         self._cache: dict[str, ProjectInfo] = {}
 
     async def resolve(
@@ -50,7 +51,7 @@ class ModResolver:
         if mod_id in self._cache:
             project_info = self._cache[mod_id]
         else:
-            project_info = await self.client.get_project(mod_id)
+            project_info = await self.catalog.get_project(mod_id)
             if project_info:
                 self._cache[mod_id] = project_info
 
@@ -58,8 +59,11 @@ class ModResolver:
             return None
 
         # 获取版本信息（支持版本固定）
-        version_info, file_info = await self.client.get_version(
-            project_info.id, mc_version, mod_loader, specific_version=pinned_version
+        version_info, file_info = await self.catalog.get_version(
+            project_info.id,
+            mc_version,
+            mod_loader,
+            specific_version=pinned_version,
         )
 
         if not version_info or not file_info:
@@ -73,17 +77,7 @@ class ModResolver:
         mc_version: str,
         mod_loader: str,
     ) -> List[tuple[ProjectInfo, VersionInfo, dict]]:
-        """
-        批量解析模组
-
-        Args:
-            mods: 模组列表
-            mc_version: Minecraft 版本
-            mod_loader: 模组加载器
-
-        Returns:
-            解析成功的模组信息列表
-        """
+        """批量解析模组"""
         results = []
         for mod in mods:
             result = await self.resolve(mod, mc_version, mod_loader)

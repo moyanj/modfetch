@@ -1,5 +1,5 @@
 """
-Mrpack 生成器
+Mrpack 构建器（自 packager.mrpack 迁移）
 
 实现 Modrinth 标准整合包 (.mrpack) 的生成。
 """
@@ -11,8 +11,8 @@ from typing import Optional
 
 import aiofiles
 
-from modfetch.models import ModLoader
-from modfetch.exceptions import MrpackError
+from modfetch.domain.config_models import ModLoader
+from modfetch.domain.errors import MrpackError
 
 
 class MrpackBuilder:
@@ -102,7 +102,7 @@ class MrpackBuilder:
         """创建 manifest.json"""
         mod_loader_id = mod_loader.value.lower()
 
-        dependencies = {"minecraft": mc_version}
+        dependencies: dict = {"minecraft": mc_version}
         if loader_version and loader_version != "unknown":
             dependencies[f"{mod_loader_id}-loader"] = loader_version
 
@@ -136,26 +136,18 @@ class MrpackBuilder:
         mod_loader: ModLoader,
         get_loader_version_fn,
     ) -> list[str]:
-        """
-        为多个版本构建 mrpack
-
-        Args:
-            base_dir: 基础目录
-            versions: 版本列表
-            metadata: 包元数据
-            mod_loader: 模组加载器
-            get_loader_version_fn: 获取加载器版本的函数
-
-        Returns:
-            生成的文件路径列表
-        """
+        """为多个版本构建 mrpack（保留旧接口）"""
         results = []
         for version in versions:
             source_dir = os.path.join(base_dir, f"{version}-{mod_loader.value}")
             if not os.path.exists(source_dir):
                 continue
 
-            output_name = f"{metadata.get('name', 'pack')}_{metadata.get('version', '1.0.0')}_MC{version}-{mod_loader.value}"
+            output_name = (
+                f"{metadata.get('name', 'pack')}_"
+                f"{metadata.get('version', '1.0.0')}_"
+                f"MC{version}-{mod_loader.value}"
+            )
             output_path = os.path.join(base_dir, output_name)
 
             loader_version = await get_loader_version_fn(version)

@@ -42,7 +42,7 @@ class FilterPlugin(ModFetchPlugin):
 
     def on_pre_resolve(self, context: HookContext) -> HookResult:
         """解析模组前检查黑名单"""
-        from modfetch.models import ModEntry
+        from modfetch.domain.config_models import ModEntry
 
         mod_entry = context.mod_entry
         if isinstance(mod_entry, ModEntry):

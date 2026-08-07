@@ -1,5 +1,5 @@
 """
-ZIP 生成器
+ZIP 构建器（自 packager.zip 迁移）
 
 实现目录压缩功能。
 """
@@ -8,7 +8,7 @@ import os
 import shutil
 from typing import Optional
 
-from modfetch.exceptions import ZipError
+from modfetch.domain.errors import ZipError
 
 
 class ZipBuilder:
@@ -55,18 +55,7 @@ class ZipBuilder:
         mod_loader: str,
         output_dir: Optional[str] = None,
     ) -> list[str]:
-        """
-        为多个版本构建 ZIP
-
-        Args:
-            base_dir: 基础目录
-            versions: 版本列表
-            mod_loader: 模组加载器
-            output_dir: 输出目录（默认为 base_dir）
-
-        Returns:
-            生成的文件路径列表
-        """
+        """为多个版本构建 ZIP（保留旧接口）"""
         if output_dir is None:
             output_dir = base_dir
 
