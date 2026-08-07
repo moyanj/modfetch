@@ -134,10 +134,6 @@ class TestParseModEntries:
 
 
 class TestKnownBugs:
-    @pytest.mark.xfail(
-        reason="bug: from_dict 的 pop('from') 会修改调用方传入的 dict",
-        strict=False,
-    )
     def test_from_dict_does_not_mutate_input(self):
         """from_dict 不应修改调用方传入的 dict（回归测试）"""
         raw = {
@@ -147,10 +143,6 @@ class TestKnownBugs:
         ModFetchConfig.from_dict(raw)
         assert "from" in raw, "输入 dict 被 from_dict 修改了"
 
-    @pytest.mark.xfail(
-        reason="bug: format 为字符串时会逐字符遍历导致 ValueError",
-        strict=False,
-    )
     def test_parse_format_string_not_list(self):
         """format = "mrpack"（字符串而非列表）→ 应正确解析为 [MRPACK]"""
         config = ModFetchConfig.from_dict(

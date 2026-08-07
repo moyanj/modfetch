@@ -41,7 +41,8 @@ class ModrinthClient:
             else:
                 raise APIError(
                     f"API 请求失败 (状态码: {response.status})",
-                    response=response,
+                    status_code=response.status,
+                    url=str(response.url),
                 )
 
     async def get_project(self, idx: str) -> Optional[ProjectInfo]:

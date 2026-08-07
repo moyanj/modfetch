@@ -1,29 +1,29 @@
 """
-ModFetch 数据模型包
+向后兼容 shim — 数据模型已迁入 modfetch.domain
 
-包含配置模型和 API 模型定义。
+旧导入路径 from modfetch.models import X 继续可用（已弃用，将随主版本移除）。
 """
 
-from modfetch.models.config import (
-    ModLoader,
-    OutputFormat,
-    FileType,
+from modfetch.domain.config_models import (  # noqa: F401
     ConditionalEntry,
-    ModEntry,
     ExtraUrl,
-    ParentConfig,
-    MinecraftConfig,
-    OutputConfig,
+    FileType,
     MetadataConfig,
-    PluginConfig,
+    MinecraftConfig,
+    ModEntry,
     ModFetchConfig,
+    ModLoader,
     MrpackMode,
+    OutputConfig,
+    OutputFormat,
+    ParentConfig,
+    PluginConfig,
 )
-from modfetch.models.api import (
-    ProjectType,
-    ProjectInfo,
-    FileInfo,
+from modfetch.domain.models import (  # noqa: F401
     DependencyInfo,
+    FileInfo,
+    ProjectInfo,
+    ProjectType,
     VersionInfo,
 )
 
