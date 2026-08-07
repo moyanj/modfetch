@@ -76,6 +76,10 @@ class PlanBuild:
         self._version_matcher = version_matcher or VersionMatcher(catalog)
         self._hook = hook
 
+    @property
+    def catalog(self) -> CatalogPort:
+        return self._catalog
+
     async def execute(
         self, config: ModFetchConfig, features: Optional[List[str]] = None
     ) -> Tuple[BuildPlan, PlanReport]:
@@ -98,6 +102,11 @@ class PlanBuild:
             targets=tuple(targets),
             artifacts=tuple(all_artifacts),
             outputs=tuple(all_outputs),
+            metadata={
+                "name": config.metadata.name,
+                "version": config.metadata.version,
+                "description": config.metadata.description,
+            },
         )
         return plan, report
 

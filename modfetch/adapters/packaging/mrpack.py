@@ -59,10 +59,12 @@ class MrpackPackager:
                 target.loader, target.minecraft_version
             )
 
+        # 优先使用 plan 携带的元数据，回退到构造期默认值
+        source = plan.metadata or self._metadata
         metadata = {
-            "name": self._metadata.get("name", "ModFetch Pack"),
-            "version": self._metadata.get("version", "1.0.0"),
-            "description": self._metadata.get("description", ""),
+            "name": source.get("name", "ModFetch Pack"),
+            "version": source.get("version", "1.0.0"),
+            "description": source.get("description", ""),
         }
 
         # REFERENCE 模式: overrides 只含 extra_urls 文件

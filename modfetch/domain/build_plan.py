@@ -92,11 +92,12 @@ class OutputSpec:
 
 @dataclass(frozen=True)
 class BuildPlan:
-    """构建计划：目标集合 + 制品集合 + 输出规格集合"""
+    """构建计划：目标集合 + 制品集合 + 输出规格集合 + 包元数据"""
 
     targets: Tuple[BuildTarget, ...]
     artifacts: Tuple[ResolvedArtifact, ...]
     outputs: Tuple[OutputSpec, ...]
+    metadata: Dict[str, str] = field(default_factory=dict)
 
     def artifacts_for(self, target: BuildTarget) -> Tuple[ResolvedArtifact, ...]:
         return tuple(a for a in self.artifacts if a.target == target)

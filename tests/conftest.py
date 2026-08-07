@@ -157,6 +157,17 @@ def mock_modrinth(
 
         monkeypatch.setattr(ModrinthClient, f"get_{loader}_version", getter)
 
+    # CatalogPort 统一入口（阶段3新增）也要离线化
+    async def fake_get_loader_version(
+        self: ModrinthClient, loader: str, mc_version: str
+    ) -> Optional[str]:
+        return api.loader_versions.get(loader)
+
+    monkeypatch.setattr(
+        ModrinthClient, "get_loader_version",
+        fake_get_loader_version, raising=False,
+    )
+
     # session 惰性创建属性也要禁用，避免真实 aiohttp.ClientSession 泄漏
     monkeypatch.setattr(
         ModrinthClient,
