@@ -1,19 +1,13 @@
 # 含 feature / only_version 过滤的配置
-# 注: toml 0.10 解析器无法解析含内联表的混合数组，
-#     字典条目必须用 [[minecraft.mods]] 追加语法
+# mods 数组支持异构：dict 条目与字符串混写（TOML 1.0 标准，tomllib/tomli 支持）
 [minecraft]
 version = ["1.21.1"]
 mod_loader = "fabric"
-mods = ["sodium"]
-
-[[minecraft.mods]]
-id = "fabric-api"
-feature = "opt"
-
-[[minecraft.mods]]
-slug = "sodium"
-version = "0.6.0"
-only_version = "1.21.1"
+mods = [
+    "sodium",
+    { id = "fabric-api", feature = "opt" },
+    { slug = "sodium", version = "0.6.0", only_version = "1.21.1" },
+]
 
 [output]
 download_dir = "downloads"

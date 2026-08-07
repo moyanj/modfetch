@@ -4,9 +4,10 @@ import json
 from pathlib import Path
 
 import pytest
-import toml
 import yaml
 
+from modfetch.adapters.config.toml_parser import load as load_toml
+from modfetch.adapters.config.toml_parser import loads as toml_loads
 from modfetch.domain import (
     FileType,
     ModEntry,
@@ -22,7 +23,7 @@ FIXTURES = Path(__file__).parent.parent / "fixtures" / "configs"
 class TestParseToml:
     def test_parse_toml_minimal(self):
         """最小 TOML 配置 → ModFetchConfig，默认值正确"""
-        raw = toml.load(FIXTURES / "minimal.toml")
+        raw = load_toml(FIXTURES / "minimal.toml")
         config = ModFetchConfig.from_dict(raw)
 
         assert config.minecraft.version == ["1.21.1"]
@@ -37,12 +38,12 @@ class TestParseToml:
         assert config.metadata.name == "TestPack"
 
     def test_parse_multi_version(self):
-        raw = toml.load(FIXTURES / "multi_version.toml")
+        raw = load_toml(FIXTURES / "multi_version.toml")
         config = ModFetchConfig.from_dict(raw)
         assert config.minecraft.version == ["1.21.1", "1.20.4"]
 
     def test_parse_multi_loader(self):
-        raw = toml.load(FIXTURES / "multi_loader.toml")
+        raw = load_toml(FIXTURES / "multi_loader.toml")
         config = ModFetchConfig.from_dict(raw)
         assert config.minecraft.mod_loader == [ModLoader.FABRIC, ModLoader.FORGE]
 
@@ -108,7 +109,7 @@ class TestParseModEntries:
         assert config.minecraft.mods[1] == "fabric-api"
 
     def test_parse_mod_entry_dict(self):
-        raw = toml.load(FIXTURES / "feature_gated.toml")
+        raw = load_toml(FIXTURES / "feature_gated.toml")
         config = ModFetchConfig.from_dict(raw)
 
         gated = config.minecraft.mods[1]
@@ -153,11 +154,39 @@ class TestKnownBugs:
         )
         assert config.output.format == [OutputFormat.MRPACK]
 
+    def test_toml_heterogeneous_mods_array(self):
+        """TOML mods 数组混写 dict 与字符串 → 完整解析（回归: 旧 toml 库要求同构）"""
+        raw = toml_loads(
+            "[minecraft]\n"
+            'version = ["1.21.1"]\n'
+            'mod_loader = "fabric"\n'
+            "mods = [\n"
+            '    { id = "sodium", feature = "performance" },\n'
+            '    "rei"\n'
+            "]\n"
+        )
+        config = ModFetchConfig.from_dict(raw)
+        assert len(config.minecraft.mods) == 2
+        assert isinstance(config.minecraft.mods[0], ModEntry)
+        assert config.minecraft.mods[0].id == "sodium"
+        assert config.minecraft.mods[1] == "rei"
+
+    def test_toml_root_keys_before_tables(self):
+        """根表键放在 [table] 之前 → toml 解析完整（旧 toml 库会静默丢弃）"""
+        raw = toml_loads(
+            'max_concurrent = 10\nfeatures = ["perf"]\n'
+            "[metadata]\nname = \"x\""
+        )
+        # 顶层键完整保留（回归: 旧 toml 库读文件时根表键被并入子表丢失）
+        assert raw["max_concurrent"] == 10
+        assert raw["features"] == ["perf"]
+        assert raw["metadata"] == {"name": "x"}
+
 
 class TestRoundTrip:
     def test_to_dict_round_trip(self):
         """to_dict → from_dict 应保持关键字段一致"""
-        raw = toml.load(FIXTURES / "minimal.toml")
+        raw = load_toml(FIXTURES / "minimal.toml")
         config = ModFetchConfig.from_dict(raw)
         restored = ModFetchConfig.from_dict(config.to_dict())
 

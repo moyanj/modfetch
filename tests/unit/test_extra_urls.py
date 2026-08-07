@@ -3,8 +3,8 @@
 from pathlib import Path
 
 import pytest
-import toml
 
+from modfetch.adapters.config.toml_parser import load as load_toml
 from modfetch.domain import ExtraUrl, FileType, ModFetchConfig
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "configs"
@@ -12,7 +12,7 @@ FIXTURES = Path(__file__).parent.parent / "fixtures" / "configs"
 
 class TestExtraUrlParse:
     def test_parse_fixture(self):
-        raw = toml.load(FIXTURES / "extra_urls.toml")
+        raw = load_toml(FIXTURES / "extra_urls.toml")
         config = ModFetchConfig.from_dict(raw)
 
         urls = config.minecraft.extra_urls

@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Mapping
 
-import toml
+from modfetch.adapters.config.toml_parser import load as load_toml
 
 
 class TomlConfigSource:
@@ -18,4 +18,4 @@ class TomlConfigSource:
 
     def load(self, path: Path) -> Mapping[str, Any]:
         """读取并解析 TOML 文件为配置字典"""
-        return toml.load(str(path))
+        return load_toml(path)

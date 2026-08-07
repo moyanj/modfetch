@@ -11,9 +11,9 @@ import json
 from typing import Any, Dict, Optional
 
 import aiohttp
-import toml
 import yaml
 
+from modfetch.adapters.config.toml_parser import loads as toml_loads
 from modfetch.domain.config_models import ModFetchConfig
 
 
@@ -85,7 +85,7 @@ async def resolve_inheritance(
                     content = await response.text()
                     # 按 format 选择解析器（toml/json/yaml）
                     if fmt == "toml":
-                        parent_dict = toml.loads(content)
+                        parent_dict = toml_loads(content)
                     elif fmt == "json":
                         parent_dict = json.loads(content)
                     elif fmt in ("yaml", "yml"):

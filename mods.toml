@@ -12,7 +12,7 @@ version = ["1.21.4"]
 mod_loader = "fabric"
 
 mods = [
-    "rei",
+    { slug = "rei" },
     "betterf3",
     "journeymap",
     "imblocker-original",

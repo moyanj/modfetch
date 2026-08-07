@@ -152,6 +152,8 @@ async def run_async(
             config = config_service.parse(load_config(config_path))
             # 显式传入 CLI 的功能标签做本地校验（含跨字段条件编译判断），
             # 此时 config.features 尚未被 --feature 覆盖，必须显式传参
+
+            print(config.to_dict())
             config_service.validate_local(config, features)
             config.features = features
 
@@ -170,7 +172,6 @@ async def run_async(
                             await plugin_loader.load_from_module(plugin_name)
                         except Exception as e:
                             logger.warning(f"从配置加载插件 {plugin_name} 失败: {e}")
-
             # 远程校验
             async with ModrinthClient() as client:
                 report = await config_service.validate_remote(config, client)
