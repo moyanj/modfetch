@@ -1,15 +1,24 @@
-"""
-ModFetch 下载层
+"""向后兼容 shim — 下载组件已迁入 modfetch.adapters.download
 
-包含下载管理、任务队列、文件校验等功能。
+旧 DownloadManager/DownloadQueue 已删除，由 DownloadExecutor/HttpDownloader 替代。
 """
 
-from modfetch.download.manager import DownloadManager
-from modfetch.download.queue import DownloadQueue
-from modfetch.download.verifier import FileVerifier
+from modfetch.adapters.download import (  # noqa: F401
+    DownloadExecutor,
+    ExecutionReport,
+    FileArtifactStore,
+    HttpDownloader,
+    LocalFileCopier,
+    RetryPolicy,
+)
+from modfetch.adapters.download.verifier import FileVerifier  # noqa: F401
 
 __all__ = [
-    "DownloadManager",
-    "DownloadQueue",
+    "DownloadExecutor",
+    "ExecutionReport",
+    "FileArtifactStore",
+    "HttpDownloader",
+    "LocalFileCopier",
+    "RetryPolicy",
     "FileVerifier",
 ]

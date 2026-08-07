@@ -2,7 +2,7 @@
 ModFetch - Minecraft 模组下载管理工具
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # 初始化日志
 from modfetch.logger import setup_logger
@@ -16,7 +16,8 @@ from modfetch.models import (
     OutputConfig,
     MetadataConfig,
 )
-from modfetch.orchestrator import ModFetchOrchestrator
+from modfetch.application.build_service import BuildApplicationService
+from modfetch.composition import create_build_service
 from modfetch.exceptions import ModFetchError
 from modfetch.logger import logger
 
@@ -26,7 +27,8 @@ __all__ = [
     "MinecraftConfig",
     "OutputConfig",
     "MetadataConfig",
-    "ModFetchOrchestrator",
+    "BuildApplicationService",
+    "create_build_service",
     "ModFetchError",
     "logger",
 ]
