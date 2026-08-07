@@ -1,22 +1,31 @@
 """
-依赖处理服务
+依赖处理服务（向后兼容包装）
 
-实现依赖图构建、依赖去重、循环依赖检测。
+无状态实现已迁入 modfetch.application.dependency_resolver.DependencyGraphResolver。
+本模块保留旧类名 DependencyResolver 与旧返回类型（list），
+内部委托给无状态实现；实例级 _processed/_dependencies 仅作兼容占位。
 """
 
-from typing import Set, List
+from typing import List, Set
 
-from modfetch.models import ProjectInfo, VersionInfo
-from modfetch.services.api_client import ModrinthClient
+from modfetch.application.dependency_resolver import (
+    DependencyGraphResolver,
+    DependencyGraph,  # noqa: F401 (兼容再导出)
+)
+from modfetch.domain.models import ProjectInfo, VersionInfo
+from modfetch.ports.catalog import CatalogPort
 
 
 class DependencyResolver:
-    """依赖解析器"""
+    """旧接口兼容包装 — 委托给 DependencyGraphResolver"""
 
-    def __init__(self, client: ModrinthClient):
+    def __init__(self, client: CatalogPort):
         self.client = client
+        self._resolver = DependencyGraphResolver(client)
+        # 兼容占位: 外部代码不应再依赖这两个集合
         self._processed: Set[str] = set()
         self._dependencies: List[tuple[ProjectInfo, VersionInfo, dict]] = []
+        self.last_graph: DependencyGraph | None = None
 
     async def resolve(
         self,
@@ -24,59 +33,12 @@ class DependencyResolver:
         mc_version: str,
         mod_loader: str,
     ) -> List[tuple[ProjectInfo, VersionInfo, dict]]:
-        """
-        解析依赖
-
-        Args:
-            version_info: 版本信息
-            mc_version: Minecraft 版本
-            mod_loader: 模组加载器
-
-        Returns:
-            依赖列表 (project_info, version_info, file_info)
-        """
-        self._processed.clear()
-        self._dependencies.clear()
-
-        await self._resolve_recursive(version_info, mc_version, mod_loader)
-
-        return self._dependencies
-
-    async def _resolve_recursive(
-        self,
-        version_info: VersionInfo,
-        mc_version: str,
-        mod_loader: str,
-    ):
-        """递归解析依赖"""
-        for dep in version_info.dependencies:
-            dep_type = dep.dependency_type
-            dep_id = dep.project_id
-
-            if dep_type != "required":
-                continue
-
-            if dep_id in self._processed:
-                continue
-
-            self._processed.add(dep_id)
-
-            # 获取依赖项目信息
-            dep_info = await self.client.get_project(dep_id)
-            if not dep_info:
-                continue
-
-            # 获取依赖版本信息
-            dep_version, dep_file = await self.client.get_version(
-                dep_id, mc_version, mod_loader
-            )
-
-            if dep_version and dep_file:
-                self._dependencies.append((dep_info, dep_version, dep_file))
-                # 递归解析依赖的依赖
-                await self._resolve_recursive(dep_version, mc_version, mod_loader)
+        """解析依赖，返回与旧实现同构的列表"""
+        graph = await self._resolver.resolve(version_info, mc_version, mod_loader)
+        self.last_graph = graph
+        return graph.nodes
 
     def clear_cache(self):
-        """清除缓存"""
+        """清除缓存（无状态实现下为 no-op，保留兼容）"""
         self._processed.clear()
         self._dependencies.clear()
