@@ -13,7 +13,12 @@ class LogEventSink:
     """
 
     async def publish(self, event: BuildEvent) -> None:
-        """按事件类型输出对应级别日志（info/success/error 分级）"""
+        """按事件类型输出对应级别日志（info/success/error 分级）
+
+        注意：DOWNLOAD_STARTED/COMPLETED/FAILED 不在此输出——
+        下载器的开始/完成/失败/重试日志由 HttpDownloader 直接打印，
+        事件路径再打印会与下载器日志重复（同一文件出现两遍）。
+        """
         data = event.payload
         et = event.event_type
 
@@ -23,15 +28,6 @@ class LogEventSink:
             logger.info(
                 f"构建计划: {data.get('targets', 0)} 个目标, "
                 f"{data.get('artifacts', 0)} 个制品"
-            )
-        elif et == EventType.DOWNLOAD_STARTED:
-            logger.info(f"[开始] 下载: {data.get('filename', '')}")
-        elif et == EventType.DOWNLOAD_COMPLETED:
-            logger.success(f"[完成] '{data.get('filename', '')}' 下载完成")
-        elif et == EventType.DOWNLOAD_FAILED:
-            logger.error(
-                f"[错误] 下载 '{data.get('filename', '')}' 失败: "
-                f"{data.get('error', '')}"
             )
         elif et == EventType.PACKAGE_STARTED:
             logger.info(

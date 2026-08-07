@@ -10,9 +10,11 @@ Modrinth API 客户端
   当前统一走 APIError 以便调用方集中处理；如需按状态码细分可在此扩展。
 """
 
+import time
 from typing import List, Optional, Tuple
 
 import aiohttp
+from loguru import logger
 
 from modfetch.adapters.modrinth.facets import build_modrinth_facets
 from modfetch.adapters.modrinth.mapper import (
@@ -80,12 +82,24 @@ class ModrinthClient:
         业务结果而非异常），其余错误统一抛 APIError，由上层
         应用服务统一捕获处理。
         """
+        start = time.monotonic()
         async with self.session.get(endpoint, params=params) as response:
+            elapsed_ms = (time.monotonic() - start) * 1000
+            # 记录请求与响应状态，便于排查网络/参数/API 问题
+            logger.debug(
+                f"[Modrinth] GET {endpoint} params={params or {}} "
+                f"-> {response.status} ({elapsed_ms:.0f}ms)"
+            )
             if response.status == 200:
                 return await response.json()
             elif response.status == 404:
+                logger.debug(f"[Modrinth] 404 (未找到): {endpoint} params={params or {}}")
                 return None
             else:
+                logger.warning(
+                    f"[Modrinth] 请求失败: {response.status} {endpoint} "
+                    f"params={params or {}}"
+                )
                 raise APIError(
                     f"API 请求失败 (状态码: {response.status})",
                     status_code=response.status,
@@ -119,8 +133,14 @@ class ModrinthClient:
         """
         response = await self._request(f"{MODRINTH_BASE_URL}/project/{identifier}")
         if response is None:
+            logger.info(f"[Modrinth] 项目未找到(404): {identifier}")
             return None
-        return map_project(response)
+        project = map_project(response)
+        logger.debug(
+            f"[Modrinth] 获取项目: {identifier} -> {project.name} "
+            f"(id={project.id}, type={project.project_type})"
+        )
+        return project
 
     async def search(
         self,
@@ -178,7 +198,12 @@ class ModrinthClient:
             return []
         # hits 是搜索结果的条目列表，每项字段与 project 详情
         # 接口不同（如 project_id 而非 id），故用 map_search_hit。
-        return [map_search_hit(item) for item in response.get("hits", [])]
+        hits = [map_search_hit(item) for item in response.get("hits", [])]
+        logger.debug(
+            f"[Modrinth] 搜索 '{query}' -> {len(hits)} 条结果 "
+            f"(mc={mc_version}, loader={mod_loader})"
+        )
+        return hits
 
     async def get_version(
         self,
@@ -217,6 +242,10 @@ class ModrinthClient:
         )
 
         if response is None or len(response) == 0:
+            logger.debug(
+                f"[Modrinth] 无兼容版本: project={project_id} "
+                f"mc={mc_version} loader={loader}"
+            )
             return None, None
 
         if specific_version:
@@ -227,10 +256,22 @@ class ModrinthClient:
                     version["id"] == specific_version
                     or version["version_number"] == specific_version
                 ):
+                    logger.debug(
+                        f"[Modrinth] 精确匹配版本: project={project_id} "
+                        f"specific={specific_version} -> {version['version_number']}"
+                    )
                     return map_version(version), pick_primary_file(version)
+            logger.debug(
+                f"[Modrinth] 指定版本未匹配(不降级): project={project_id} "
+                f"specific={specific_version}, 可用 {len(response)} 个版本"
+            )
             return None, None
 
         version = response[0]
+        logger.debug(
+            f"[Modrinth] 最新兼容版本: project={project_id} mc={mc_version} "
+            f"loader={loader} -> {version.get('version_number')}"
+        )
         return map_version(version), pick_primary_file(version)
 
     async def get_loader_version(
@@ -269,9 +310,19 @@ class ModrinthClient:
                 if response.status == 200:
                     versions = await response.json()
                     if versions:
-                        return versions[0]["loader"]["version"]
-        except Exception:
-            pass
+                        ver = versions[0]["loader"]["version"]
+                        logger.debug(
+                            f"[Modrinth] {loader} meta 版本: mc={mc_version} "
+                            f"-> {ver}"
+                        )
+                        return ver
+                else:
+                    logger.warning(
+                        f"[Modrinth] {loader} meta 请求非 200: "
+                        f"{response.status} {url}"
+                    )
+        except Exception as e:
+            logger.warning(f"[Modrinth] 获取 {loader} 加载器版本失败: {e} ({url})")
         return None
 
     async def get_fabric_version(self, mc_version: str) -> Optional[str]:
@@ -299,9 +350,18 @@ class ModrinthClient:
                     versions = data.get(mc_version, [])
                     if versions:
                         # 构建号列表按时间升序，末位为最新
-                        return versions[-1]
-        except Exception:
-            pass
+                        ver = versions[-1]
+                        logger.debug(
+                            f"[Modrinth] forge 版本: mc={mc_version} -> {ver}"
+                        )
+                        return ver
+                else:
+                    logger.warning(
+                        f"[Modrinth] forge maven-metadata 非 200: "
+                        f"{response.status} {url}"
+                    )
+        except Exception as e:
+            logger.warning(f"[Modrinth] 获取 forge 版本失败: {e} ({url})")
         return None
 
     async def close(self) -> None:

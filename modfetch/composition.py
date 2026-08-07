@@ -98,4 +98,7 @@ def create_build_service(
         plan_build=plan_build,
         execute_build=execute_build,
         event_sink=sink,
+        # 构建结束需释放的资源：catalog 与 downloader 各自持有
+        # aiohttp session，由 BuildApplicationService.close() 统一关闭
+        closables=(catalog, downloader),
     )

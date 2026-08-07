@@ -122,10 +122,13 @@ class JobApplicationService:
                 max_retries=config.max_retries,
                 retry_delay=config.retry_delay,
             )
-
-            result = await service.execute(
-                config, job_id=job.id, skip_remote_validation=True
-            )
+            try:
+                result = await service.execute(
+                    config, job_id=job.id, skip_remote_validation=True
+                )
+            finally:
+                # 释放 aiohttp session（catalog/downloader），避免连接池泄漏
+                await service.close()
 
             job.completed_at = datetime.now(timezone.utc)
 

@@ -7,7 +7,7 @@ CLI 与 Web 共用同一编排:
 只依赖 domain 与 ports，不依赖 click/fastapi。
 """
 
-from typing import Optional
+from typing import Optional, Tuple, Protocol
 
 from modfetch.application.config_service import ConfigService
 from modfetch.application.execute_build import BuildOptions, ExecuteBuild
@@ -18,6 +18,13 @@ from modfetch.domain.config_models import ModFetchConfig
 from modfetch.domain.errors import ConfigValidationError
 from modfetch.domain.events import BuildEvent, EventType
 from modfetch.ports.event_sink import EventSink
+
+
+class _AsyncClosable(Protocol):
+    """可异步释放资源的协议（catalog/downloader 等持有 aiohttp session）"""
+
+    async def close(self) -> None:
+        ...
 
 
 class BuildApplicationService:
@@ -34,11 +41,24 @@ class BuildApplicationService:
         plan_build: PlanBuild,
         execute_build: ExecuteBuild,
         event_sink: EventSink,
+        closables: Tuple[_AsyncClosable, ...] = (),
     ):
         self._config_service = config_service
         self._plan_build = plan_build
         self._execute_build = execute_build
         self._event_sink = event_sink
+        #: 构建完成后需释放的资源（catalog/downloader 的 aiohttp session）
+        self._closables = closables
+
+    async def close(self) -> None:
+        """释放底层资源（aiohttp session 等）
+
+        由调用方（CLI/Web）在构建结束后调用，避免连接池与
+        session 泄漏；各资源 close 必须可重复安全调用。
+        """
+        for resource in self._closables:
+            await resource.close()
+        self._closables = ()
 
     async def execute(
         self,

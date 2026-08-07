@@ -21,6 +21,8 @@ from typing import (
     Union,
 )
 
+from loguru import logger
+
 from modfetch.application.dependency_resolver import DependencyGraphResolver
 from modfetch.domain.build_plan import (
     ArtifactCategory,
@@ -112,6 +114,10 @@ class PlanBuild:
         self._job_id = job_id
 
         targets = self._expand_targets(config)
+        logger.debug(
+            f"[计划] 展开 {len(targets)} 个 target: "
+            + ", ".join(t.dir_name for t in targets)
+        )
         all_artifacts: List[ResolvedArtifact] = []
         all_outputs: List[OutputSpec] = []
         report = PlanReport()
@@ -119,6 +125,10 @@ class PlanBuild:
         for target in targets:
             artifacts, skipped = await self._resolve_target(
                 target, config, features
+            )
+            logger.info(
+                f"[计划] {target.dir_name}: 解析到 {len(artifacts)} 个制品"
+                + (f", 跳过 {len(skipped)}: {skipped}" if skipped else "")
             )
             all_artifacts.extend(artifacts)
             report.skipped_by_target[target] = tuple(skipped)
@@ -133,6 +143,10 @@ class PlanBuild:
                 "version": config.metadata.version,
                 "description": config.metadata.description,
             },
+        )
+        logger.debug(
+            f"[计划] 生成完成: {len(plan.artifacts)} 制品, "
+            f"{len(plan.outputs)} 输出规格"
         )
         return plan, report
 
@@ -215,6 +229,9 @@ class PlanBuild:
         # 模组（含依赖）
         for mod in config.minecraft.mods:
             if not self._should_include(mod, version, features):
+                logger.debug(
+                    f"[计划] {target.dir_name} 跳过模组(版本/feature 过滤): {mod}"
+                )
                 continue
 
             mod_entry = mod if isinstance(mod, ModEntry) else None
@@ -237,6 +254,10 @@ class PlanBuild:
             result = await self._mod_resolver.resolve(mod, version, loader.value)
             if not result:
                 skipped.append(str(mod))
+                logger.warning(
+                    f"[计划] {target.dir_name} 解析失败: {mod_slug or mod} "
+                    f"(mc={version}, loader={loader.value})"
+                )
                 await self._emit_event(
                     EventType.RESOLVE_FAILED,
                     target,
@@ -309,12 +330,23 @@ class PlanBuild:
         ):
             for entry in entries:
                 if not self._should_include(entry, version, features):
+                    logger.debug(
+                        f"[计划] {target.dir_name} 跳过 {category.value}: "
+                        f"{entry} (版本/feature 过滤)"
+                    )
                     continue
+                # 资源包/光影包不区分加载器，传空 loader 以跳过 Modrinth
+                # loaders 过滤（与 remote 校验 validation.py 的空 loader
+                # 约定一致；client.get_version 遇空则不发 loaders 参数）。
                 result = await self._mod_resolver.resolve(
-                    entry, version, loader.value
+                    entry, version, ""
                 )
                 if not result:
                     skipped.append(str(entry))
+                    logger.warning(
+                        f"[计划] {target.dir_name} 解析失败({category.value}): "
+                        f"{entry}"
+                    )
                     continue
                 project_info, _, file_info = result
                 artifacts.append(
@@ -326,6 +358,10 @@ class PlanBuild:
         # 额外 URL
         for extra in config.minecraft.extra_urls:
             if not self._should_include(extra, version, features):
+                logger.debug(
+                    f"[计划] {target.dir_name} 跳过 extra_url(版本/feature 过滤): "
+                    f"{extra.url}"
+                )
                 continue
             artifacts.append(self._make_extra_url_artifact(target, extra))
 

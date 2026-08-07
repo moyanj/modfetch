@@ -165,7 +165,11 @@ async def run_async(
                 retry_delay=config.retry_delay,
                 verify_ssl=config.verify_ssl,
             )
-            result = await service.execute(config, job_id="cli")
+            try:
+                result = await service.execute(config, job_id="cli")
+            finally:
+                # 释放 aiohttp session（catalog/downloader），避免连接池泄漏
+                await service.close()
 
             if result.errors:
                 for error in result.errors:

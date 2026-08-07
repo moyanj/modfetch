@@ -36,7 +36,7 @@ def setup_logger(
     # 移除默认处理器
     logger.remove()
 
-    # 添加控制台处理器
+    # 控制台处理器：含来源定位（模块:函数:行号），便于排查
     logger.add(
         sink=sink,
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",

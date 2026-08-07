@@ -11,6 +11,8 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
+from loguru import logger
+
 from modfetch.domain.models import ProjectInfo, VersionInfo
 from modfetch.ports.catalog import CatalogPort
 
@@ -67,6 +69,19 @@ class DependencyGraphResolver:
         """
         ctx = ResolveContext()
         await self._resolve_recursive(root, mc_version, loader, ctx)
+        # 汇总诊断：缺失与环是调试重点，用日志显式暴露
+        if ctx.missing:
+            logger.warning(
+                f"[依赖] {root} 缺失依赖 {len(ctx.missing)} 个: {ctx.missing}"
+            )
+        if ctx.cycles:
+            logger.warning(
+                f"[依赖] 检测到 {len(ctx.cycles)} 条循环依赖: {ctx.cycles}"
+            )
+        logger.debug(
+            f"[依赖] 依赖图解析完成: {len(ctx.resolved)} 个依赖节点, "
+            f"{len(ctx.missing)} 缺失, {len(ctx.cycles)} 环"
+        )
         return DependencyGraph(
             nodes=ctx.resolved,
             missing=ctx.missing,
@@ -88,6 +103,10 @@ class DependencyGraphResolver:
         for dep in version_info.dependencies:
             if dep.dependency_type != "required":
                 # 可选依赖不参与下载解析（由模组自身运行时处理）
+                logger.debug(
+                    f"[依赖] 忽略可选依赖: {dep.project_id} "
+                    f"(type={dep.dependency_type})"
+                )
                 continue
 
             dep_id = dep.project_id
@@ -95,9 +114,13 @@ class DependencyGraphResolver:
             # 循环检测: 当前解析路径上再次出现
             if dep_id in ctx.visiting:
                 ctx.cycles.append([*ctx.visiting, dep_id])
+                logger.debug(
+                    f"[依赖] 循环依赖: {[*ctx.visiting, dep_id]}"
+                )
                 continue
 
             if dep_id in ctx.visited:
+                logger.debug(f"[依赖] 已解析过，跳过: {dep_id}")
                 continue
 
             ctx.visiting.append(dep_id)
@@ -107,6 +130,7 @@ class DependencyGraphResolver:
             if project is None:
                 ctx.missing.append(dep_id)
                 ctx.visiting.remove(dep_id)
+                logger.warning(f"[依赖] 依赖项目不存在: {dep_id}")
                 continue
 
             version, file_info = await self._catalog.get_version(
@@ -116,9 +140,17 @@ class DependencyGraphResolver:
                 # 当前 MC 版本/加载器下无匹配版本 → 记入 missing
                 ctx.missing.append(dep_id)
                 ctx.visiting.remove(dep_id)
+                logger.warning(
+                    f"[依赖] 无匹配版本: {project.name} ({dep_id}) "
+                    f"mc={mc_version} loader={loader}"
+                )
                 continue
 
             ctx.resolved.append((project, version, file_info))
+            logger.debug(
+                f"[依赖] 已解析: {project.name} ({dep_id}) "
+                f"-> {version.version}"
+            )
             # 先记录本节点再递归其依赖，输出序为深度优先（根在前）
             await self._resolve_recursive(version, mc_version, loader, ctx)
 

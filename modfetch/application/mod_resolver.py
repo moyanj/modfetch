@@ -7,6 +7,8 @@
 
 from typing import List, Optional, Union
 
+from loguru import logger
+
 from modfetch.domain.config_models import ModEntry
 from modfetch.domain.models import ProjectInfo, VersionInfo
 from modfetch.ports.catalog import CatalogPort
@@ -48,17 +50,26 @@ class ModResolver:
             pinned_version = mod.version
 
         if not mod_id:
+            logger.warning(f"[resolve] 模组无有效 ID/slug: {mod!r}")
             return None
 
         # 获取项目信息（使用缓存）
         if mod_id in self._cache:
             project_info = self._cache[mod_id]
+            logger.debug(f"[resolve] 缓存命中: {mod_id} -> {project_info.name}")
         else:
             project_info = await self.catalog.get_project(mod_id)
             if project_info:
                 self._cache[mod_id] = project_info
+                logger.debug(
+                    f"[resolve] 查询到项目: {mod_id} -> {project_info.name}"
+                )
 
         if not project_info:
+            logger.warning(
+                f"[resolve] 项目不存在或获取失败: {mod_id} "
+                f"(mc={mc_version}, loader={mod_loader})"
+            )
             return None
 
         # 获取版本信息（支持版本固定）
@@ -70,8 +81,18 @@ class ModResolver:
         )
 
         if not version_info or not file_info:
+            logger.warning(
+                f"[resolve] 无匹配版本: {project_info.name} ({mod_id}) "
+                f"mc={mc_version} loader={mod_loader} "
+                f"pinned={pinned_version or 'latest'}"
+            )
             return None
 
+        logger.debug(
+            f"[resolve] 解析成功: {project_info.name} ({mod_id}) "
+            f"-> version={version_info.version}, "
+            f"file={file_info.get('filename')}"
+        )
         return project_info, version_info, file_info
 
     async def resolve_many(

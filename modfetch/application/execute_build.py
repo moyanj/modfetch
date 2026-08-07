@@ -83,6 +83,9 @@ class ExecuteBuild:
         # 工作区根目录（下载与打包共用），目录缺失时自动创建
         workspace = Path(options.download_dir)
         workspace.mkdir(parents=True, exist_ok=True)
+        logger.debug(
+            f"[执行] 工作区: {workspace} (并发={options.max_concurrent})"
+        )
 
         outputs: List[OutputArtifact] = []
         errors: List[BuildError] = []
@@ -93,8 +96,14 @@ class ExecuteBuild:
 
         for target in plan.targets:
             # -- 下载 --
+            logger.debug(f"[执行] 开始 target {target.dir_name}")
             report = await self._download_target(
                 plan, target, workspace, job_id, event_sink
+            )
+            logger.debug(
+                f"[执行] target {target.dir_name} 下载报告: "
+                f"完成={report.completed}, 跳过={report.skipped}, "
+                f"失败={report.failed}, 字节={report.bytes_downloaded}"
             )
             total_downloaded += report.completed
             total_skipped += report.skipped

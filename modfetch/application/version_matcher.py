@@ -7,6 +7,8 @@ Minecraft 版本匹配、加载器版本匹配、版本范围处理。
 
 from typing import List, Optional, Union
 
+from loguru import logger
+
 from modfetch.domain.config_models import ModLoader
 from modfetch.ports.catalog import CatalogPort
 
@@ -51,6 +53,10 @@ class VersionMatcher:
                 if isinstance(need_versions, str):
                     need_versions = [need_versions]
                 if version not in need_versions:
+                    logger.debug(
+                        f"[过滤] 排除 {entry.get('id') or entry.get('slug')}: "
+                        f"only_version={need_versions} 不含 {version}"
+                    )
                     return False
 
             # 检查 feature
@@ -59,6 +65,10 @@ class VersionMatcher:
                     cfg_features = [cfg_features]
                 # 如果所有功能都启用，则排除
                 if all(feature in features for feature in cfg_features):
+                    logger.debug(
+                        f"[过滤] 排除 {entry.get('id') or entry.get('slug')}: "
+                        f"feature={cfg_features} 全部已启用"
+                    )
                     return False
 
         return True
