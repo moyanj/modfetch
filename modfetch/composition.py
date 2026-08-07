@@ -6,6 +6,7 @@ CLI 与 Web 共用：构建 BuildApplicationService 及其全部适配器依赖�
 
 from typing import Optional
 
+from modfetch.adapters.caching import CachingCatalog
 from modfetch.adapters.download import (
     FileArtifactStore,
     HttpDownloader,
@@ -23,6 +24,7 @@ from modfetch.application.config_service import ConfigService
 from modfetch.application.dependency_resolver import DependencyGraphResolver
 from modfetch.application.execute_build import ExecuteBuild
 from modfetch.application.plan_build import PlanBuild
+from modfetch.ports.catalog import CatalogPort
 from modfetch.ports.event_sink import EventSink
 
 
@@ -32,7 +34,7 @@ def create_build_service(
     max_retries: int = 3,
     retry_delay: float = 1.0,
     verify_ssl: bool = True,
-    catalog: Optional[ModrinthClient] = None,
+    catalog: Optional[CatalogPort] = None,
 ) -> BuildApplicationService:
     """组装 BuildApplicationService
 
@@ -54,7 +56,11 @@ def create_build_service(
         catalog: 自定义 CatalogPort（测试注入用）
     """
     # 默认 catalog：生产走 ModrinthClient，测试注入 stub 实现（对应 CatalogPort）
-    catalog = catalog or ModrinthClient()
+    base_catalog: CatalogPort = catalog or ModrinthClient()
+    # 请求聚合缓存：包装 catalog，消除多 target/多模组间的重复外部请求
+    # （get_project/get_version/get_loader_version），且 negative 结果一并缓存。
+    # 生命周期即本次组装，Web 端每个 job 重新组装并 close，不跨 job 污染。
+    cached_catalog = CachingCatalog(base_catalog)
 
     # 制品存储（ArtifactStorePort）：文件落盘与哈希校验的基础设施
     store = FileArtifactStore()
@@ -69,7 +75,7 @@ def create_build_service(
 
     # 加载器版本解析闭包：mrpack 打包需要的最新 loader 版本，委托给 catalog
     async def loader_version_resolver(loader, mc_version: str):
-        return await catalog.get_loader_version(loader.value, mc_version)
+        return await cached_catalog.get_loader_version(loader.value, mc_version)
 
     # 打包器（PackagerPort）分派：按 format 路由到 mrpack/zip 具体实现
     packager = PackagerDispatcher(
@@ -84,7 +90,7 @@ def create_build_service(
     # 配置服务：统一配置边界（解析/校验）
     config_service = ConfigService()
     # 计划生成用例：解析配置为 BuildPlan（依赖 catalog 与依赖图解析器）
-    plan_build = PlanBuild(catalog, DependencyGraphResolver(catalog))
+    plan_build = PlanBuild(cached_catalog, DependencyGraphResolver(cached_catalog))
     # 执行用例：按计划下载（受并发限制）并交给打包器产出制品
     execute_build = ExecuteBuild(
         downloader, packager, max_concurrent=max_concurrent
@@ -100,5 +106,5 @@ def create_build_service(
         event_sink=sink,
         # 构建结束需释放的资源：catalog 与 downloader 各自持有
         # aiohttp session，由 BuildApplicationService.close() 统一关闭
-        closables=(catalog, downloader),
+        closables=(cached_catalog, downloader),
     )
