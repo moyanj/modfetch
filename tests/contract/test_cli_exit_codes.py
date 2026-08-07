@@ -10,7 +10,13 @@ import pytest
 from click.testing import CliRunner
 
 import modfetch.cli as cli_module
+from modfetch.application.validation import ConfigValidationResult
 from modfetch.cli import main
+
+
+async def _fake_validate_remote(self, config, catalog):
+    """跳过远程校验的测试桩"""
+    return ConfigValidationResult(valid=True)
 
 
 @pytest.fixture
@@ -59,12 +65,8 @@ class TestExitCodes:
     ):
         """正常构建 → exit code 0（离线 mock 全部外部依赖）"""
         monkeypatch.chdir(tmp_path)
-
-        async def fake_remote_valid(config, client=None):
-            return True
-
         monkeypatch.setattr(
-            cli_module, "ensure_remote_config_valid", fake_remote_valid
+            cli_module.ConfigService, "validate_remote", _fake_validate_remote
         )
 
         result = runner.invoke(main, [config_file(VALID_CONFIG)])
@@ -90,12 +92,8 @@ class TestExitCodes:
     ):
         """dry-run 模式配置合法 → exit code 0"""
         monkeypatch.chdir(tmp_path)
-
-        async def fake_remote_valid(config, client=None):
-            return True
-
         monkeypatch.setattr(
-            cli_module, "ensure_remote_config_valid", fake_remote_valid
+            cli_module.ConfigService, "validate_remote", _fake_validate_remote
         )
 
         result = runner.invoke(main, [config_file(VALID_CONFIG), "--dry-run"])
@@ -122,11 +120,8 @@ download_dir = "{tmp_path}/dl"
 format = ["mrpack"]
 """
 
-        async def fake_remote_valid(cfg, client=None):
-            return True
-
         monkeypatch.setattr(
-            cli_module, "ensure_remote_config_valid", fake_remote_valid
+            cli_module.ConfigService, "validate_remote", _fake_validate_remote
         )
 
         result = runner.invoke(main, [config_file(config)])

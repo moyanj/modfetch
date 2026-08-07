@@ -5,43 +5,32 @@ CLI 模块
 """
 
 import asyncio
-import sys
 from pathlib import Path
 from typing import Optional
 
 import click
-import toml
 from loguru import logger
 
-from modfetch.models import ModFetchConfig
+from modfetch.adapters.config import get_config_source
+from modfetch.adapters.modrinth import ModrinthClient
+from modfetch.application.config_service import ConfigService
+from modfetch.application.validation import format_validation_issues
 from modfetch.orchestrator import ModFetchOrchestrator
 from modfetch.exceptions import ModFetchError
 from modfetch.logger import setup_logger
-from modfetch.services import ModrinthClient
-from modfetch.services.project_validation import ensure_remote_config_valid
 
 
 def load_config(config_path: str) -> dict:
-    """加载配置文件"""
+    """加载配置文件（按后缀分发到对应 ConfigSource）"""
     path = Path(config_path)
 
     if not path.exists():
         raise click.ClickException(f"配置文件不存在: {config_path}")
 
-    suffix = path.suffix.lower()
-
-    if suffix == ".toml":
-        return toml.load(config_path)
-    elif suffix == ".json":
-        import json
-
-        return json.loads(path.read_text())
-    elif suffix in (".yaml", ".yml"):
-        import yaml
-
-        return yaml.safe_load(path.read_text())
-    else:
-        raise click.ClickException(f"不支持的配置文件格式: {suffix}")
+    try:
+        return dict(get_config_source(path).load(path))
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
 
 
 async def run_async(
@@ -90,14 +79,16 @@ async def run_async(
         return
 
     try:
-        # 加载配置
-        config_dict = load_config(config_path)
-        config = ModFetchConfig.from_dict(config_dict)
-        config.validate()
+        # 加载配置（统一配置边界: 解析 → 本地校验 → 远程校验）
+        config_service = ConfigService()
+        config = config_service.parse(load_config(config_path))
+        config_service.validate_local(config)
         config.features = features
 
         async with ModrinthClient() as client:
-            await ensure_remote_config_valid(config, client=client)
+            report = await config_service.validate_remote(config, client)
+            if not report.is_valid:
+                raise click.ClickException(format_validation_issues(report.issues))
 
         # 从配置加载插件（Nuitka 环境使用）
         if config.plugins.enabled:

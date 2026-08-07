@@ -14,16 +14,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+from modfetch.adapters.modrinth import ModrinthClient, build_modrinth_facets
+from modfetch.application.config_service import ConfigService
+from modfetch.application.validation import validation_issue_to_dict
 from modfetch.exceptions import ModFetchError
-from modfetch.models import ModFetchConfig
 from modfetch.server import schemas
 from modfetch.server.jobs import JobManager
-from modfetch.services import ModrinthClient
-from modfetch.services.project_validation import (
-    ProjectValidationService,
-    build_modrinth_facets,
-    validation_issue_to_dict,
-)
 
 router = APIRouter(prefix="/api")
 
@@ -104,13 +100,14 @@ async def validate_config(
 ) -> schemas.ValidateConfigResponse:
     """验证配置文件"""
     errors: list[schemas.ValidationErrorItem] = []
+    config_service = ConfigService()
 
     try:
-        config = ModFetchConfig.from_dict(request.config)
-        config.validate()
+        config = config_service.parse(request.config)
+        config_service.validate_local(config)
         async with ModrinthClient() as client:
-            result = await ProjectValidationService(client).validate_config(config)
-        if not result.valid:
+            result = await config_service.validate_remote(config, client)
+        if not result.is_valid:
             errors.extend(
                 schemas.ValidationErrorItem(**validation_issue_to_dict(issue))
                 for issue in result.issues
@@ -159,13 +156,14 @@ async def create_job(
     """创建并启动新任务"""
     job_manager: JobManager = http_request.app.state.job_manager
 
-    # 先验证配置
+    # 先验证配置（统一配置边界）
+    config_service = ConfigService()
     try:
-        config = ModFetchConfig.from_dict(request.config)
-        config.validate()
+        config = config_service.parse(request.config)
+        config_service.validate_local(config)
         async with ModrinthClient() as client:
-            result = await ProjectValidationService(client).validate_config(config)
-        if not result.valid:
+            result = await config_service.validate_remote(config, client)
+        if not result.is_valid:
             raise HTTPException(
                 status_code=400,
                 detail={
