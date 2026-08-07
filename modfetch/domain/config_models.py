@@ -25,6 +25,27 @@ class ModLoader(Enum):
     NEOFORGE = "neoforge"
     FABRIC = "fabric"
     QUILT = "quilt"
+    #: 原版 / 无加载器。Modrinth 对数据包、资源包及纯原版兼容版本
+    #: 会在 loaders 字段返回 "minecraft"，与服务端/客户端加载器不同，
+    #: 需显式收录以免映射时强转失败。仅用于识别版本；不作为配置的
+    #: mod_loader 合法值（见 MinecraftConfig.validate 白名单）。
+    MINECRAFT = "minecraft"
+
+    @classmethod
+    def from_value(cls, value: object) -> Optional["ModLoader"]:
+        """宽容解析加载器标识，未知值返回 None 而非抛 ValueError
+
+        Modrinth 的加载器清单持续增加（bukkit/paper/folia/databreaker 等
+        服务端或历史加载器），领域层不维护完整清单。对来自 API 的
+        loaders 字段采用"命中已识别值则转换、否则忽略"的策略，避免
+        任一未知值导致整条版本解析中断；配置层仍走严格路径。
+        """
+        if not isinstance(value, str):
+            return None
+        try:
+            return cls(value)
+        except ValueError:
+            return None
 
 
 class OutputFormat(Enum):

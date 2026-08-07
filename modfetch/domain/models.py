@@ -92,7 +92,13 @@ class VersionInfo:
             id=data.get("id", ""),
             name=data.get("name", ""),
             version=data.get("version_number", ""),
-            loaders=[ModLoader(loader) for loader in data.get("loaders", [])],
+            # 宽容解析加载器：Modrinth 会返回 minecraft/bukkit/paper 等
+            # 领域层未定义的标识，命中不了的就跳过，而非强转抛异常。
+            loaders=[
+                loader
+                for raw in data.get("loaders", [])
+                if (loader := ModLoader.from_value(raw)) is not None
+            ],
             game_versions=data.get("game_versions", []),
             dependencies=dependencies,
         )
