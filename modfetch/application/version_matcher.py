@@ -9,7 +9,7 @@ from typing import List, Optional, Union
 
 from loguru import logger
 
-from modfetch.domain.config_models import ModLoader
+from modfetch.domain.config_models import ConditionalEntry, ModLoader
 from modfetch.ports.catalog import CatalogPort
 
 
@@ -38,38 +38,56 @@ class VersionMatcher:
 
     def should_include(
         self,
-        entry: Union[dict, str],
+        entry: Union[ConditionalEntry, dict, str],
         version: str,
         features: List[str],
     ) -> bool:
         """判断项目是否应包含在当前构建中
 
-        注: 仅 dict 条目参与 only_version/feature 过滤；
-        对象条目（ModEntry 等）按现有行为视为始终包含。
-        """
-        if isinstance(entry, dict):
-            # 检查 only_version
-            if need_versions := entry.get("only_version"):
-                if isinstance(need_versions, str):
-                    need_versions = [need_versions]
-                if version not in need_versions:
-                    logger.debug(
-                        f"[过滤] 排除 {entry.get('id') or entry.get('slug')}: "
-                        f"only_version={need_versions} 不含 {version}"
-                    )
-                    return False
+        支持 ConditionalEntry(ModEntry/ExtraUrl) 对象、dict 与字符串条目：
+        - only_version: 版本命中指定列表才包含
+        - feature: 启用条件——条目声明的 feature 全部被启用才包含；
+          未声明 feature 的条目始终包含（与 ConditionalEntry 文档一致）
 
-            # 检查 feature
-            if cfg_features := entry.get("feature"):
-                if isinstance(cfg_features, str):
-                    cfg_features = [cfg_features]
-                # 如果所有功能都启用，则排除
-                if all(feature in features for feature in cfg_features):
-                    logger.debug(
-                        f"[过滤] 排除 {entry.get('id') or entry.get('slug')}: "
-                        f"feature={cfg_features} 全部已启用"
-                    )
-                    return False
+        注: 历史实现对 dict 条目采用"全部启用则排除"的反向语义，
+        且对象条目(dataclass)从未命中 dict 分支导致过滤失效；本方法
+        统一为启用条件语义并支持对象条目。
+        """
+        # 对象条目（ModEntry/ExtraUrl）与 dict 均提取条件字段；字符串无条件
+        if isinstance(entry, ConditionalEntry):
+            only_version = entry.only_version
+            cfg_features = entry.feature
+        elif isinstance(entry, dict):
+            only_version = entry.get("only_version")
+            cfg_features = entry.get("feature")
+        else:
+            return True
+
+        # only_version: 版本不在指定列表 → 排除
+        if only_version:
+            versions = (
+                [only_version]
+                if isinstance(only_version, str)
+                else list(only_version)
+            )
+            if version not in versions:
+                logger.debug(
+                    f"[过滤] 排除 {entry}: only_version={versions} 不含 {version}"
+                )
+                return False
+
+        # feature: 启用条件——所有声明的功能标签都被启用才包含
+        if cfg_features:
+            feats = (
+                [cfg_features]
+                if isinstance(cfg_features, str)
+                else list(cfg_features)
+            )
+            if not all(feature in features for feature in feats):
+                logger.debug(
+                    f"[过滤] 排除 {entry}: feature={feats} 未全部启用"
+                )
+                return False
 
         return True
 

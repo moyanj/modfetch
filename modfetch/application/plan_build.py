@@ -32,6 +32,7 @@ from modfetch.domain.build_plan import (
     ResolvedArtifact,
 )
 from modfetch.domain.config_models import (
+    SHADER_LOADER_SLUGS,
     ExtraUrl,
     FileType,
     ModEntry,
@@ -323,6 +324,12 @@ class PlanBuild:
                     )
                 )
 
+        # 光影加载器（iris/oculus/optifine，本版本生效者）——用于光影包
+        # 版本查询时作为 loader 过滤（Modrinth 光影包版本按 loading 声明兼容性）
+        shader_loader = self._active_shader_loader_slug(
+            config, version, features
+        )
+
         # 资源包 / 光影包
         for entries, category in (
             (config.minecraft.resourcepacks, ArtifactCategory.resourcepacks()),
@@ -335,11 +342,13 @@ class PlanBuild:
                         f"{entry} (版本/feature 过滤)"
                     )
                     continue
-                # 资源包/光影包不区分加载器，传空 loader 以跳过 Modrinth
-                # loaders 过滤（与 remote 校验 validation.py 的空 loader
-                # 约定一致；client.get_version 遇空则不发 loaders 参数）。
+                # 资源包不区分加载器，传空 loader；光影包按实际配置的光影
+                # 加载器（iris/oculus/optifine）过滤，匹配已声明兼容性的版本。
+                # 均与 remote 校验的空/入 loader 约定对齐；client.get_version
+                # 遇空则不发 loaders 参数。
+                pack_loader = "" if category.value == "resourcepacks" else shader_loader
                 result = await self._mod_resolver.resolve(
-                    entry, version, ""
+                    entry, version, pack_loader
                 )
                 if not result:
                     skipped.append(str(entry))
@@ -430,6 +439,28 @@ class PlanBuild:
     ) -> bool:
         """按版本与功能标签过滤条目（委托 VersionMatcher）"""
         return self._version_matcher.should_include(entry, version, features)
+
+    def _active_shader_loader_slug(
+        self,
+        config: ModFetchConfig,
+        version: str,
+        features: List[str],
+    ) -> str:
+        """返回当前版本/功能标签下生效的光影加载器 slug（iris/oculus/optifine）
+
+        在 mods 中查找声明为光影加载器的条目（需通过 only_version/feature
+        条件过滤）；未找到返回空字符串，此时光影包版本查询不过滤 loader。
+        """
+        for mod in config.minecraft.mods:
+            if isinstance(mod, ModEntry):
+                slug = mod.slug or mod.id
+            else:
+                slug = mod
+            if slug and slug.lower() in SHADER_LOADER_SLUGS and self._should_include(
+                mod, version, features
+            ):
+                return slug.lower()
+        return ""
 
     async def _emit_hook(self, name: str, **kwargs: Any) -> None:
         """触发解析阶段插件钩子（未注入 hook 时为空操作）"""

@@ -53,8 +53,37 @@ class TestPackLoaderSemantics:
         assert by_project["sodium"].endswith("1.21.1:fabric")
         assert by_project["faithful"].endswith("1.21.1:")
 
-    async def test_shaderpack_uses_empty_loader(self, stub_catalog, make_config_dict):
-        """光影包同样以空 loader 查询版本"""
+    async def test_shaderpack_uses_shader_loader(self, stub_catalog, make_config_dict):
+        """光影包以实际配置的光影加载器(iris)作为 loader 查询版本"""
+        stub_catalog.add_project("complementary", "complementary")
+        stub_catalog.add_project("iris", "iris")
+
+        config = ModFetchConfig.from_dict(
+            make_config_dict(
+                minecraft={
+                    "version": ["1.21.1"],
+                    "mod_loader": "forge",
+                    "mods": ["iris"],
+                    "shaderpacks": ["complementary"],
+                }
+            )
+        )
+
+        plan_build = PlanBuild(catalog=stub_catalog)
+        plan, _ = await plan_build.execute(config)
+
+        # iris(mod) + complementary(shaderpack)
+        assert len(plan.artifacts) == 2
+        shader_calls = [
+            c for c in stub_catalog.calls if c.startswith("get_version:complementary")
+        ]
+        # 光影包按 iris loader 过滤（与 Modrinth 光影包版本的 loaders 声明对应）
+        assert shader_calls and shader_calls[0].endswith("1.21.1:iris")
+
+    async def test_shaderpack_no_loader_falls_back_empty(
+        self, stub_catalog, make_config_dict
+    ):
+        """mods 中无光影加载器时，光影包回退为空 loader 查询"""
         stub_catalog.add_project("complementary", "complementary")
 
         config = ModFetchConfig.from_dict(

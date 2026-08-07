@@ -121,7 +121,9 @@ async def run_async(
             # 加载配置（统一配置边界: 解析 → 本地校验）
             config_service = ConfigService()
             config = config_service.parse(load_config(config_path))
-            config_service.validate_local(config)
+            # 显式传入 CLI 的功能标签做本地校验（含跨字段条件编译判断），
+            # 此时 config.features 尚未被 --feature 覆盖，必须显式传参
+            config_service.validate_local(config, features)
             config.features = features
 
             # 从配置加载插件（Nuitka 环境使用）

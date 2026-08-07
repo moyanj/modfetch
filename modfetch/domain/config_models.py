@@ -14,6 +14,12 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
 
+#: 光影加载器 Modrinth slug 集合（oculus 为 iris 的 Forge/NeoForge
+#: 移植，二者等价；optifine 独立）。配置声明光影包时，mods 必须
+#: 包含其中之一作为光影加载器。
+SHADER_LOADER_SLUGS: tuple[str, ...] = ("iris", "oculus", "optifine")
+
+
 class ModLoader(Enum):
     """模组加载器类型
 
