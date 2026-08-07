@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
+from modfetch.adapters.modrinth import ModrinthClient
 from modfetch.server.jobs import JobManager
 from modfetch.server.routes import router as api_router
 from modfetch.server.ws import router as ws_router
@@ -46,8 +47,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # 注入 JobManager
+    # 注入 JobManager 与共享 catalog
     app.state.job_manager = JobManager()
+    app.state.catalog = ModrinthClient()
 
     # 注册 REST 路由
     app.include_router(api_router)
@@ -69,6 +71,7 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
+        await app.state.catalog.close()
         logger.info("ModFetch API 服务关闭")
 
     return app

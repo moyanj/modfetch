@@ -1,77 +1,12 @@
 """WebSocket 事件格式契约测试
 
-契约:
-- 每个事件是 dict，必含 "event": str 与 "data": dict
-- JobState._apply_event 正确折叠事件到状态快照
-- 晚订阅者可回放事件历史
+事件信封（event/data）与 JobState 折叠契约。
+统一事件的信封与字段契约见 test_job_event_sink.py。
 """
 
 import pytest
 
-from modfetch.models import ModFetchConfig, ModEntry
-from modfetch.plugins.base import HookContext
-from modfetch.server.events import EventBridgePlugin
 from modfetch.server.jobs import JobState, JobStats
-
-
-@pytest.fixture
-def config(make_config_dict):
-    return ModFetchConfig.from_dict(make_config_dict())
-
-
-class EventCollector:
-    """收集广播事件的 fake broadcaster"""
-
-    def __init__(self):
-        self.events: list[dict] = []
-
-    async def __call__(self, event: dict) -> None:
-        self.events.append(event)
-
-
-class TestEventEnvelope:
-    async def test_all_events_have_envelope(self, config):
-        """EventBridgePlugin 产出的所有事件都有 event/data 信封"""
-        collector = EventCollector()
-        plugin = EventBridgePlugin(broadcaster=collector)
-
-        ctx = HookContext(
-            config=config,
-            version="1.21.1",
-            mod_entry=ModEntry(slug="sodium"),
-            extra_data={"filename": "sodium.jar", "url": "https://x/y.jar"},
-        )
-        await plugin._on_config_loaded(ctx)
-        await plugin._on_config_validated(ctx)
-        await plugin._on_pre_resolve(ctx)
-        await plugin._on_post_resolve(ctx)
-        await plugin._on_pre_download(ctx)
-        await plugin._on_download_progress(ctx)
-        await plugin._on_post_download(ctx)
-        await plugin._on_download_failed(ctx)
-        await plugin._on_pre_package(ctx)
-        await plugin._on_post_package(ctx)
-
-        assert len(collector.events) > 0
-        for event in collector.events:
-            assert isinstance(event, dict)
-            assert isinstance(event.get("event"), str), f"缺 event 字段: {event}"
-            assert isinstance(event.get("data"), dict), f"缺 data 字段: {event}"
-
-    async def test_event_names(self, config):
-        """关键事件名集合契约"""
-        collector = EventCollector()
-        plugin = EventBridgePlugin(broadcaster=collector)
-        ctx = HookContext(config=config, version="1.21.1", extra_data={})
-
-        await plugin._on_config_loaded(ctx)
-        await plugin._on_pre_download(ctx)
-        await plugin._on_pre_package(ctx)
-
-        names = [e["event"] for e in collector.events]
-        assert "phase_change" in names
-        assert "download_start" in names
-        assert "package_start" in names
 
 
 def _make_job() -> JobState:

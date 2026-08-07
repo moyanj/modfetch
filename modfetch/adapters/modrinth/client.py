@@ -56,6 +56,17 @@ class ModrinthClient:
                     url=str(response.url),
                 )
 
+    async def raw_get(
+        self, path: str, params: Optional[dict] = None
+    ) -> Tuple[int, Optional[object]]:
+        """裸 GET 透传（供路由层代理 Modrinth API，返回 (status, json)）"""
+        async with self.session.get(
+            f"{MODRINTH_BASE_URL}{path}", params=params
+        ) as response:
+            if response.status == 200:
+                return 200, await response.json()
+            return response.status, None
+
     async def get_project(self, identifier: str) -> Optional[ProjectInfo]:
         """获取项目信息"""
         response = await self._request(f"{MODRINTH_BASE_URL}/project/{identifier}")

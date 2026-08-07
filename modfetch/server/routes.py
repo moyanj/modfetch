@@ -6,28 +6,29 @@ REST API 路由
 
 from __future__ import annotations
 
-import os
 from typing import Optional
 
-import aiohttp
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from modfetch.adapters.modrinth import ModrinthClient, build_modrinth_facets
+from modfetch.adapters.modrinth import build_modrinth_facets
 from modfetch.application.config_service import ConfigService
 from modfetch.application.validation import validation_issue_to_dict
 from modfetch.exceptions import ModFetchError
+from modfetch.ports.catalog import CatalogPort
 from modfetch.server import schemas
 from modfetch.server.jobs import JobManager
 
 router = APIRouter(prefix="/api")
 
-# Modrinth API 基础 URL
-MODRINTH_BASE = "https://api.modrinth.com/v2"
-
-# 项目版本 (从 pyproject.toml 读取，回退到硬编码)
+# 项目版本
 APP_VERSION = "0.2.0"
+
+
+def _catalog(request: Request) -> CatalogPort:
+    """从 app.state 获取共享 catalog（由 app 工厂注入）"""
+    return request.app.state.catalog
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +98,7 @@ async def health() -> schemas.HealthResponse:
 @router.post("/config/validate", response_model=schemas.ValidateConfigResponse)
 async def validate_config(
     request: schemas.ValidateConfigRequest,
+    http_request: Request,
 ) -> schemas.ValidateConfigResponse:
     """验证配置文件"""
     errors: list[schemas.ValidationErrorItem] = []
@@ -105,8 +107,9 @@ async def validate_config(
     try:
         config = config_service.parse(request.config)
         config_service.validate_local(config)
-        async with ModrinthClient() as client:
-            result = await config_service.validate_remote(config, client)
+        result = await config_service.validate_remote(
+            config, _catalog(http_request)
+        )
         if not result.is_valid:
             errors.extend(
                 schemas.ValidationErrorItem(**validation_issue_to_dict(issue))
@@ -161,8 +164,9 @@ async def create_job(
     try:
         config = config_service.parse(request.config)
         config_service.validate_local(config)
-        async with ModrinthClient() as client:
-            result = await config_service.validate_remote(config, client)
+        result = await config_service.validate_remote(
+            config, _catalog(http_request)
+        )
         if not result.is_valid:
             raise HTTPException(
                 status_code=400,
@@ -221,6 +225,7 @@ async def get_job(job_id: str, http_request: Request) -> JSONResponse:
 @router.get("/search", response_model=schemas.SearchResponse)
 async def search(
     q: str,
+    http_request: Request,
     limit: int = 20,
     offset: int = 0,
     facets: Optional[str] = None,
@@ -242,20 +247,17 @@ async def search(
     if merged_facets:
         params["facets"] = merged_facets
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            f"{MODRINTH_BASE}/search", params=params
-        ) as response:
-            if response.status != 200:
-                raise HTTPException(
-                    status_code=502,
-                    detail={
-                        "error": True,
-                        "code": "E200",
-                        "message": f"Modrinth API 返回 {response.status}",
-                    },
-                )
-            data = await response.json()
+    catalog = _catalog(http_request)
+    status, data = await catalog.raw_get("/search", params=params)
+    if status != 200 or data is None:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": True,
+                "code": "E200",
+                "message": f"Modrinth API 返回 {status}",
+            },
+        )
 
     hits: list[schemas.SearchHit] = []
     for hit in data.get("hits", []):
@@ -283,31 +285,30 @@ async def search(
 
 
 @router.get("/projects/{slug_or_id}", response_model=schemas.ProjectResponse)
-async def get_project(slug_or_id: str) -> schemas.ProjectResponse:
+async def get_project(
+    slug_or_id: str, http_request: Request
+) -> schemas.ProjectResponse:
     """代理 Modrinth 项目信息 API"""
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            f"{MODRINTH_BASE}/project/{slug_or_id}"
-        ) as response:
-            if response.status == 404:
-                raise HTTPException(
-                    status_code=404,
-                    detail={
-                        "error": True,
-                        "code": "E404",
-                        "message": f"项目 {slug_or_id} 不存在",
-                    },
-                )
-            if response.status != 200:
-                raise HTTPException(
-                    status_code=502,
-                    detail={
-                        "error": True,
-                        "code": "E200",
-                        "message": f"Modrinth API 返回 {response.status}",
-                    },
-                )
-            data = await response.json()
+    catalog = _catalog(http_request)
+    status, data = await catalog.raw_get(f"/project/{slug_or_id}")
+    if status == 404:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": True,
+                "code": "E404",
+                "message": f"项目 {slug_or_id} 不存在",
+            },
+        )
+    if status != 200 or data is None:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": True,
+                "code": "E200",
+                "message": f"Modrinth API 返回 {status}",
+            },
+        )
 
     return schemas.ProjectResponse(
         id=str(data.get("id", "")),
@@ -338,19 +339,17 @@ async def get_project(slug_or_id: str) -> schemas.ProjectResponse:
 
 
 @router.get("/minecraft/versions", response_model=schemas.MinecraftVersionsResponse)
-async def minecraft_versions() -> schemas.MinecraftVersionsResponse:
+async def minecraft_versions(
+    http_request: Request,
+) -> schemas.MinecraftVersionsResponse:
     """获取 Minecraft 版本列表 (代理 Modrinth tag API)"""
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{MODRINTH_BASE}/tag/game_version"
-            ) as response:
-                if response.status != 200:
-                    return schemas.MinecraftVersionsResponse(
-                        versions=_static_mc_versions(),
-                        items=_static_mc_version_items(),
-                    )
-                data = await response.json()
+        status, data = await _catalog(http_request).raw_get("/tag/game_version")
+        if status != 200:
+            return schemas.MinecraftVersionsResponse(
+                versions=_static_mc_versions(),
+                items=_static_mc_version_items(),
+            )
 
         versions: list[str] = []
         items: list[schemas.MinecraftVersionItem] = []
@@ -384,18 +383,14 @@ async def minecraft_versions() -> schemas.MinecraftVersionsResponse:
 
 
 @router.get("/minecraft/loaders", response_model=schemas.MinecraftLoadersResponse)
-async def minecraft_loaders() -> schemas.MinecraftLoadersResponse:
+async def minecraft_loaders(
+    http_request: Request,
+) -> schemas.MinecraftLoadersResponse:
     """获取模组加载器列表 (代理 Modrinth tag API)"""
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{MODRINTH_BASE}/tag/loader"
-            ) as response:
-                if response.status != 200:
-                    return schemas.MinecraftLoadersResponse(
-                        loaders=_static_loaders()
-                    )
-                data = await response.json()
+        status, data = await _catalog(http_request).raw_get("/tag/loader")
+        if status != 200:
+            return schemas.MinecraftLoadersResponse(loaders=_static_loaders())
 
         loaders: list[schemas.LoaderInfo] = []
         if isinstance(data, list):

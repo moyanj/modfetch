@@ -21,9 +21,15 @@ EventBroadcaster = Callable[[Dict], Awaitable[None]]
 class JobEventSink:
     """Web 作业状态事件接收器（实现 EventSink）"""
 
-    def __init__(self, broadcaster: EventBroadcaster, job_id: str):
+    def __init__(
+        self,
+        broadcaster: EventBroadcaster,
+        job_id: str,
+        config_summary: Optional[Dict] = None,
+    ):
         self._broadcaster = broadcaster
         self._job_id = job_id
+        self._config_summary = config_summary
         self._sequence = 0
 
         # 统计计数器（从事件中累积真实数据）
@@ -38,7 +44,10 @@ class JobEventSink:
         data = event.payload
 
         if et == EventType.BUILD_STARTED:
-            await self._emit("job_started", {"job_id": self._job_id})
+            payload: Dict = {"job_id": self._job_id}
+            if self._config_summary is not None:
+                payload["config_summary"] = self._config_summary
+            await self._emit("job_started", payload)
 
         elif et == EventType.CONFIG_VALIDATED:
             await self._emit("phase_change", {"phase": "resolve"})
