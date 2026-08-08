@@ -37,6 +37,7 @@ Minecraft 模组下载/打包工具：Python 后端（modfetch/）+ Vue 3 前端
 | Task | Location |
 |------|----------|
 | Build orchestration | `modfetch/application/build_service.py` |
+| Build layout / cache key / slug | `modfetch/application/build_layout.py` |
 | Config parse/validate | `modfetch/application/config_service.py` + `validation.py` |
 | Plan generation (expand×resolve) | `modfetch/application/plan_build.py` |
 | Dependency graph | `modfetch/application/dependency_resolver.py` |
@@ -55,7 +56,9 @@ Minecraft 模组下载/打包工具：Python 后端（modfetch/）+ Vue 3 前端
 ## COMMANDS
 ```bash
 uv sync --dev            # 安装依赖（dev 组：nuitka/pytest/pytest-asyncio）
-uv run modfetch          # 运行 CLI（⚠️ 见 ANTI-PATTERNS：入口声明需修复）
+uv run modfetch          # 运行 CLI（入口已修复为 modfetch.__main__:main）
+uv run modfetch --clean-cache   # 清理全局缓存（显式命令）
+uv run modfetch --clean-build   # 清理打包工作区（保留缓存）
 uv run pytest            # 测试（pytest-asyncio auto 模式）
 uv run nuitka_build.py   # Nuitka → modfetch.bin（CI 同款；不是 python build.py）
 ```
@@ -77,8 +80,6 @@ uv run nuitka_build.py   # Nuitka → modfetch.bin（CI 同款；不是 python b
 - `python build.py`（不存在）——构建脚本是 `nuitka_build.py`
 
 ## KNOWN GOTCHAS (待修复)
-- **`pyproject.toml` 入口声明损坏**：`modfetch = "modfetch.__main__:cli_main"`，但代码只有 `cli.main`（无 `cli_main`）。`uv run modfetch` 会 ImportError
-- CLI `--version` 硬编码 `0.1.0`，与 `__version__`/pyproject `0.2.0` 不一致
 - `server/app.py` 静态挂载路径 `modfetch/server/app.py` 的 `parent.parent` = `modfetch/`，实际 `web/` 在项目根，路径应为 `parent.parent.parent`
 - `server/app.py` 用弃用的 `@app.on_event`；CORS `allow_origins=["*"]` + `allow_credentials=True` 是非法组合
 - **CI `build.yml` 名为 "Build and Test" 但不跑测试**（仅构建）
@@ -87,6 +88,10 @@ uv run nuitka_build.py   # Nuitka → modfetch.bin（CI 同款；不是 python b
 - `ValidationError`（E500）与 `APIServerError`（HTTP 5xx）错误码冲突
 
 ## NOTES
+- 构建布局（新）：`download_dir` 根下固定 `build/cache`（全局内容寻址缓存，sha1/url 键）+ `build/{mc}-{loader}`（打包工作区，硬链接到 cache）+ `dist/`（唯一扁平交付目录）；路径计算集中 `application/build_layout.py`（BuildLayout）
+- 物化策略默认硬链接；`--link-mode copy` 显式切换复制；硬链接失败报错不静默复制（fail-fast 预检）
+- 产物命名 `<pack-slug>-<ver>-mc<mc>-<loader>[-<mode>].<fmt>`，slug 由 metadata.name 规范化（normalize_slug）
+- Nuitka 构建已启用 `--windows-long-path-aware`（Windows 长路径）
 - 构建产物 / 下载走 `./downloads/`（gitignored）；Nuitka 产出各平台 `modfetch.bin`
 - `post.py` 是根级独立插件（非包代码，经 `--plugin ./post.py` 加载）
 - `uv.lock` 不提交 → CI 每次 `uv sync` 重新解析，构建非确定性（待评估是否纳入版本控制）

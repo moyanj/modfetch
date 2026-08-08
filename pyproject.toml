@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.scripts]
-modfetch = "modfetch.__main__:cli_main"
+modfetch = "modfetch.__main__:main"
 
 [tool.setuptools]
 packages = { find = { where = ["."] } }

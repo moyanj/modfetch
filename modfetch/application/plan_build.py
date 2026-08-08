@@ -166,17 +166,24 @@ class PlanBuild:
     ) -> List[OutputSpec]:
         """为单个 target 生成输出规格（mrpack/zip）
 
-        mrpack 多模式时以 -{mode} 后缀区分同名输出；zip 使用独立命名，
-        避免与 mrpack 产物冲突。
+        产物命名统一为扁平 dist 约定:
+            <pack-slug>-<pack-version>-mc<mc-version>-<loader>[-<mode>]
+
+        - pack-slug: metadata.name 规范化（小写/空白转-/ASCII 白名单）
+        - pack-version: metadata.version（原始值，不规范化）
+        - mrpack 多模式时以 -<mode> 后缀区分同名输出；zip 共用同一前缀。
         """
+        from modfetch.application.build_layout import normalize_slug
+
+        slug = normalize_slug(config.metadata.name)
         specs: List[OutputSpec] = []
-        metadata = config.metadata
         version = target.minecraft_version
         loader = target.loader.value
+        base = f"{slug}-{config.metadata.version}-mc{version}-{loader}"
 
         if OutputFormat.MRPACK in config.output.format:
             for mode in config.output.mrpack_modes:
-                # 多模式时附加 -{mode} 后缀（沿用旧命名契约）
+                # 多模式时附加 -{mode} 后缀（单一模式无后缀，保持简洁）
                 suffix = (
                     f"-{mode.value}"
                     if len(config.output.mrpack_modes) > 1
@@ -186,10 +193,7 @@ class PlanBuild:
                     OutputSpec(
                         format="mrpack",
                         target=target,
-                        output_name=(
-                            f"{metadata.name}_{metadata.version}"
-                            f"_MC{version}-{loader}{suffix}"
-                        ),
+                        output_name=f"{base}{suffix}",
                         mrpack_mode=mode.value,
                     )
                 )
@@ -199,7 +203,7 @@ class PlanBuild:
                 OutputSpec(
                     format="zip",
                     target=target,
-                    output_name=f"archive-{version}-{loader}",
+                    output_name=base,
                 )
             )
 
@@ -471,8 +475,9 @@ class PlanBuild:
         self, event_type: EventType, target: BuildTarget, payload: Dict[str, Any]
     ) -> None:
         """发布统一构建事件（提供 event_sink 时）"""
-        if getattr(self, "_sink", None) is not None:
-            await self._sink.publish(
+        sink = getattr(self, "_sink", None)
+        if sink is not None:
+            await sink.publish(
                 BuildEvent(
                     job_id=getattr(self, "_job_id", ""),
                     event_type=event_type,

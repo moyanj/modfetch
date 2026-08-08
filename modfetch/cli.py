@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 import click
 from loguru import logger
 
+from modfetch import __version__
 from modfetch.adapters.config import get_config_source
 from modfetch.adapters.modrinth import ModrinthClient
 from modfetch.application.config_service import ConfigService
@@ -36,6 +37,18 @@ def load_config(config_path: str) -> dict:
         return dict(get_config_source(path).load(path))
     except ValueError as e:
         raise click.ClickException(str(e)) from e
+
+
+def _build_options(config, link_mode: str):
+    """从配置派生构建执行选项（布局 + 并发 + 物化策略）"""
+    from modfetch.application.build_layout import BuildLayout
+    from modfetch.application.execute_build import BuildOptions
+
+    return BuildOptions(
+        layout=BuildLayout(config.output.download_dir),
+        max_concurrent=config.max_concurrent,
+        link_mode=link_mode,
+    )
 
 
 def _is_lua_plugin(path: str) -> bool:
@@ -104,6 +117,9 @@ async def run_async(
     dry_run: bool = False,
     plan: bool = False,
     plan_out: Optional[str] = None,
+    clean_cache: bool = False,
+    clean_build: bool = False,
+    link_mode: str = "link",
 ):
     """运行 CLI 主流程（插件加载 + 配置校验 + 构建）
 
@@ -153,7 +169,6 @@ async def run_async(
             # 显式传入 CLI 的功能标签做本地校验（含跨字段条件编译判断），
             # 此时 config.features 尚未被 --feature 覆盖，必须显式传参
 
-            print(config.to_dict())
             config_service.validate_local(config, features)
             config.features = features
 
@@ -190,6 +205,22 @@ async def run_async(
                 logger.info(f"  光影包数量: {len(config.minecraft.shaderpacks)}")
                 return
 
+            # 清理模式：显式命令（--clean-cache / --clean-build），执行后退出
+            if clean_cache or clean_build:
+                from modfetch.application.build_layout import (
+                    BuildLayout,
+                    clean_layout,
+                )
+
+                layout = BuildLayout(config.output.download_dir)
+                removed = clean_layout(layout, cache=clean_cache)
+                if removed:
+                    for path in removed:
+                        logger.info(f"[清理] 已删除: {path}")
+                else:
+                    logger.info("[清理] 无内容可清理")
+                return
+
             # 通过应用服务执行构建
             service = create_build_service(
                 max_concurrent=config.max_concurrent,
@@ -206,7 +237,11 @@ async def run_async(
                     else:
                         click.echo(result.to_json())
                     return
-                result = await service.execute(config, job_id="cli")
+                result = await service.execute(
+                    config,
+                    job_id="cli",
+                    options=_build_options(config, link_mode),
+                )
             finally:
                 # 释放 aiohttp session（catalog/downloader），避免连接池泄漏
                 await service.close()
@@ -242,7 +277,15 @@ async def run_async(
 @click.option("--debug", is_flag=True, help="启用调试模式")
 @click.option("--plan", is_flag=True, help="仅生成构建计划")
 @click.option("--plan-out", help="构建计划输出路径")
-@click.version_option(version="0.1.0")
+@click.option(
+    "--link-mode",
+    type=click.Choice(["link", "copy"]),
+    default="link",
+    help="物化策略: link(硬链接到缓存,默认) / copy(复制)",
+)
+@click.option("--clean-cache", is_flag=True, help="清理全局缓存后退出")
+@click.option("--clean-build", is_flag=True, help="清理打包工作区后退出")
+@click.version_option(version=__version__)
 def main(
     config: str,
     feature: tuple,
@@ -253,6 +296,9 @@ def main(
     debug: bool,
     plan: bool,
     plan_out: str,
+    link_mode: str,
+    clean_cache: bool,
+    clean_build: bool,
 ):
     """ModFetch - Minecraft 模组下载管理工具
 
@@ -277,6 +323,9 @@ def main(
             dry_run,
             plan,
             plan_out,
+            clean_cache,
+            clean_build,
+            link_mode,
         )
     )
 

@@ -18,6 +18,10 @@ def build_with_nuitka():
         "--windows-icon-from-ico=logo/logo.ico",
         "--linux-icon=logo/logo_raw.png",
         "--assume-yes-for-downloads",
+        # Windows 长路径支持（longPathAware manifest）：
+        # downloads/build/cache/ 嵌套 + 长模组文件名易逼近 MAX_PATH=260，
+        # 需在二进制 manifest 声明 longPathAware（Nuitka 自动注入）
+        "--windows-long-path-aware",
         "modfetch/__main__.py",
     ]
     print("\nStarting Nuitka build process with command:")

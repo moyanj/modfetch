@@ -5,7 +5,6 @@ from typing import Protocol
 
 from modfetch.domain.build_plan import (
     BuildPlan,
-    BuildTarget,
     OutputArtifact,
     OutputSpec,
 )
@@ -22,14 +21,18 @@ class PackagerPort(Protocol):
         self,
         plan: BuildPlan,
         spec: OutputSpec,
-        target: BuildTarget,
-        workspace: Path,
+        source_dir: Path,
+        output_path: Path,
     ) -> OutputArtifact:
-        """将 workspace 中 target 对应的制品打包为输出文件
+        """将 source_dir 中的制品打包为 output_path 指向的产物文件
+
+        显式接收源目录与最终输出路径，打包器不再自行猜测工作区结构：
+            - source_dir: target 打包工作区（含 mods/resourcepacks/... 子目录）
+            - output_path: 最终产物完整路径（含扩展名），父目录已存在
 
         实现期望：
-            - 依据 plan.artifacts_for(target) 与 spec.format/mrpack_mode 组织内容
-            - 产出文件写入 workspace（或约定输出目录），返回 OutputArtifact
+            - 依据 plan.artifacts_for(spec.target) 与 spec.format/mrpack_mode 组织内容
+            - 产出文件先写 output_path 同目录的临时文件，成功后原子替换
             - 失败抛出 PackagerError，异常消息应含可诊断上下文
 
         Raises:

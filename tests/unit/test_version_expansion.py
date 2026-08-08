@@ -78,15 +78,20 @@ class TestOutputNaming:
         assert f"{version}-{loader.value}" == expected
 
     def test_mrpack_output_naming(self):
-        """mrpack 输出命名: {name}_{version}_MC{mc}-{loader}（orchestrator._generate_mrpack_for_version）"""
-        metadata = {"name": "TestPack", "version": "1.0.0"}
-        name = f"{metadata['name']}_{metadata['version']}_MC1.21.1-fabric"
-        assert name == "TestPack_1.0.0_MC1.21.1-fabric"
+        """mrpack 输出命名: {slug}-{version}-mc{version}-{loader}（plan_build._make_output_specs）"""
+        from modfetch.application.build_layout import normalize_slug
+
+        slug = normalize_slug("TestPack")
+        name = f"{slug}-1.0.0-mc1.21.1-fabric"
+        assert name == "testpack-1.0.0-mc1.21.1-fabric"
 
     def test_mrpack_multi_mode_suffix(self):
         """多 mrpack 模式时附加 -{mode} 后缀"""
+        from modfetch.application.build_layout import normalize_slug
+
+        slug = normalize_slug("TestPack")
         modes = ["download", "reference"]
         for mode in modes:
             suffix = f"-{mode}" if len(modes) > 1 else ""
-            name = f"TestPack_1.0.0_MC1.21.1-fabric{suffix}"
+            name = f"{slug}-1.0.0-mc1.21.1-fabric{suffix}"
             assert name.endswith(f"-{mode}")

@@ -5,7 +5,6 @@ from typing import Dict
 
 from modfetch.domain.build_plan import (
     BuildPlan,
-    BuildTarget,
     OutputArtifact,
     OutputSpec,
 )
@@ -21,7 +20,6 @@ class PackagerDispatcher:
     """
 
     def __init__(self, packagers: Dict[str, PackagerPort]):
-        # 复制注册表，避免外部修改影响本实例
         self._packagers = dict(packagers)
 
     def register(self, format: str, packager: PackagerPort) -> None:
@@ -32,10 +30,12 @@ class PackagerDispatcher:
         self,
         plan: BuildPlan,
         spec: OutputSpec,
-        target: BuildTarget,
-        workspace: Path,
+        source_dir: Path,
+        output_path: Path,
     ) -> OutputArtifact:
         """按 spec.format 路由到已注册的打包器
+
+        显式接收 source_dir（工作区）与 output_path（最终产物路径）。
 
         Raises:
             PackagerError: 该格式未注册任何打包器
@@ -46,5 +46,4 @@ class PackagerDispatcher:
                 f"未注册的输出格式: {spec.format}",
                 context={"format": spec.format},
             )
-        # 委托给具体打包器执行
-        return await packager.package(plan, spec, target, workspace)
+        return await packager.package(plan, spec, source_dir, output_path)

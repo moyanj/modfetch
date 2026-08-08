@@ -96,8 +96,9 @@ class BuildApplicationService:
         """
         sink = event_sink or self._event_sink
         # 未显式提供时从配置派生默认下载目录与并发上限
+        # （目录布局 BuildLayout 集中计算 cache/工作区/dist 路径）
         options = options or BuildOptions(
-            download_dir=config.output.download_dir,
+            layout=self._build_layout(config),
             max_concurrent=config.max_concurrent,
         )
 
@@ -186,6 +187,13 @@ class BuildApplicationService:
             )
 
         return result
+
+    @staticmethod
+    def _build_layout(config: ModFetchConfig):
+        """从配置构造构建目录布局（集中计算 cache/工作区/dist）"""
+        from modfetch.application.build_layout import BuildLayout
+
+        return BuildLayout(config.output.download_dir)
 
     @staticmethod
     async def _publish(

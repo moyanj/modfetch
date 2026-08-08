@@ -12,7 +12,7 @@ HTTP 下载器（DownloaderPort 实现）
 import asyncio
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 import aiohttp
 from loguru import logger
@@ -60,6 +60,9 @@ class HttpDownloader:
         #: 外部注入的 session 生命周期归注入方管理。
         self._owned_session = session is None
         self._verify_ssl = verify_ssl
+        #: 进程内 per-URL 互斥锁：同一 URL 并发请求只允许一次网络下载，
+        #: 等待者在锁释放后重新校验缓存完整性（见 download 内 verify）。
+        self._url_locks: Dict[str, asyncio.Lock] = {}
 
     @property
     def session(self) -> aiohttp.ClientSession:
@@ -104,13 +107,36 @@ class HttpDownloader:
                 error_code="E303",
             )
 
-        # file:// 协议走本地复制
+        # file:// 协议走本地复制（无需并发锁，本地 IO 幂等）
         if task.url.startswith("file://"):
             return await self._download_local(task, file_path)
 
-        # 已存在且校验通过 → 跳过
-        # 幂等优化：目标文件已存在且 SHA1 匹配则直接跳过，
-        # 避免重复下载同一文件（多版本构建时常见）。
+        # 缓存键级互斥：同一 URL 只允许一个网络下载。
+        # 等待者在锁释放后重新执行缓存校验（可能已被首个请求填充）。
+        lock = self._url_lock(task.url)
+        async with lock:
+            return await self._download_http(task, file_path, progress)
+
+    def _url_lock(self, url: str) -> asyncio.Lock:
+        """获取 URL 对应的进程内互斥锁（惰性创建）"""
+        lock = self._url_locks.get(url)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._url_locks[url] = lock
+        return lock
+
+    async def _download_http(
+        self,
+        task: DownloadTask,
+        file_path: Path,
+        progress: Optional[ProgressCallback],
+    ) -> DownloadResult:
+        """在锁内执行 HTTP 下载（含缓存命中预检与重试循环）
+
+        锁语义：持锁期间才可发起网络请求；锁释放前先做一次幂等
+        校验，等待者（已被锁阻挡）释放后重新校验缓存完整性。
+        """
+        # 已存在且校验通过 → 跳过（幂等优化：多 target/多 job 共享缓存）
         if await self._store.verify(file_path, self._hashes(task)):
             logger.info(f"[跳过] '{task.filename}' 已存在且校验通过")
             return DownloadResult(

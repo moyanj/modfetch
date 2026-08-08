@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from modfetch.application.build_layout import normalize_slug
 from modfetch.application.build_service import BuildApplicationService
 from modfetch.composition import create_build_service
 from modfetch.domain.config_models import ModFetchConfig
@@ -40,6 +41,16 @@ async def _run(
     return result, Path(config.output.download_dir)
 
 
+def _mrpack_path(root: Path, *, slug: str = "testpack",
+                 version: str = "1.0.0", mc: str = "1.21.1",
+                 loader: str = "fabric", mode: str = "") -> Path:
+    """按新布局构造期望的 mrpack 路径"""
+    base = f"{slug}-{version}-mc{mc}-{loader}"
+    if mode:
+        base += f"-{mode}"
+    return root / "dist" / f"{base}.mrpack"
+
+
 class TestBuildService:
     async def test_full_build_via_service(self, make_config_dict):
         """新架构完整链路: 校验 → 计划 → 下载 → 打包"""
@@ -50,7 +61,7 @@ class TestBuildService:
         assert len(result.outputs) == 1
         assert result.stats.downloaded == 2  # sodium + fabric-api 依赖
 
-        mrpack = download_dir / "TestPack_1.0.0_MC1.21.1-fabric.mrpack"
+        mrpack = _mrpack_path(download_dir)
         assert mrpack.exists()
         with zipfile.ZipFile(mrpack) as zf:
             manifest = json.loads(zf.read("modrinth.index.json"))
@@ -110,7 +121,7 @@ class TestBuildService:
 
         assert result.success
         assert len(result.outputs) == 4
-        assert len(list(download_dir.glob("*.mrpack"))) == 4
+        assert len(list((download_dir / "dist").glob("*.mrpack"))) == 4
 
     async def test_reference_mode(self, make_config_dict):
         """REFERENCE 模式: 不下载平台制品，manifest 引用完整"""
@@ -120,7 +131,7 @@ class TestBuildService:
         )
 
         assert result.success
-        mrpack = download_dir / "TestPack_1.0.0_MC1.21.1-fabric.mrpack"
+        mrpack = _mrpack_path(download_dir)
         with zipfile.ZipFile(mrpack) as zf:
             manifest = json.loads(zf.read("modrinth.index.json"))
             paths = {f["path"] for f in manifest["files"]}
@@ -159,7 +170,7 @@ class TestBuildService:
         assert result.success
         # extra_url 文件计入下载统计
         assert result.stats.downloaded == 3  # sodium + fabric-api + custom.json
-        mrpack = download_dir / "TestPack_1.0.0_MC1.21.1-fabric.mrpack"
+        mrpack = _mrpack_path(download_dir)
         with zipfile.ZipFile(mrpack) as zf:
             # file 类型 → overrides 根目录
             assert "overrides/custom.json" in zf.namelist()
@@ -189,7 +200,7 @@ class TestBuildService:
         )
 
         assert result.success
-        mrpack = download_dir / "TestPack_1.0.0_MC1.21.1-fabric.mrpack"
+        mrpack = _mrpack_path(download_dir)
         with zipfile.ZipFile(mrpack) as zf:
             manifest = json.loads(zf.read("modrinth.index.json"))
             # catalog 制品写入 manifest.files（引用模式）
@@ -222,6 +233,6 @@ class TestBuildService:
         )
 
         assert result.success
-        mrpack = download_dir / "TestPack_1.0.0_MC1.21.1-fabric.mrpack"
+        mrpack = _mrpack_path(download_dir)
         with zipfile.ZipFile(mrpack) as zf:
             assert "overrides/shaderpacks/seus.zip" in zf.namelist()

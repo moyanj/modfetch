@@ -104,7 +104,7 @@ extra_urls = [
 
 ```toml
 [output]
-# 下载目录
+# 构建根目录（固定结构: build/cache 全局缓存 + build/{mc}-{loader} 工作区 + dist/ 交付）
 download_dir = "./downloads"
 
 # 输出格式: "mrpack" | "zip"
@@ -113,6 +113,22 @@ format = ["mrpack"]
 # mrpack 模式: "download"（下载到 overrides）| "reference"（仅引用）
 mrpack_modes = ["download"]
 ```
+
+构建目录结构（`download_dir` 固定布局）：
+
+```
+downloads/
+├── build/
+│   ├── cache/                # 全局内容寻址缓存（跨版本/加载器共享）
+│   │   ├── sha1/<前缀>/<sha1>   # 有可信哈希 → 内容寻址
+│   │   └── url/<URL摘要>        # 无哈希 → URL 摘要 + .meta.json 元数据
+│   └── <mc版本>-<加载器>/      # 打包工作区（硬链接到 cache，不重复占空间）
+└── dist/                     # 唯一交付目录（扁平，最终产物）
+    └── <pack-slug>-<版本>-mc<mc>-<加载器>[-<模式>].<格式>
+```
+
+- 默认物化策略为**硬链接**；文件系统不支持时可用 `--link-mode copy` 显式切换复制
+- 缓存清理是显式命令：`modfetch --clean-cache`（普通 `--clean-build` 只清理工作区，保留缓存）
 
 ### 插件配置
 
@@ -221,6 +237,9 @@ modfetch [OPTIONS] CONFIG
   --plugin TEXT            加载插件（可多次使用）
   --plugin-dir TEXT        插件目录路径
   --list-plugins           列出已加载的插件
+  --link-mode [link|copy]  物化策略: link(硬链接到缓存,默认) / copy(复制)
+  --clean-cache            清理全局缓存后退出（显式命令）
+  --clean-build            清理打包工作区后退出（保留缓存）
   --dry-run                干运行模式（只验证配置）
   --debug                  启用调试模式
   --version                显示版本

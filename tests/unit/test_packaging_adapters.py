@@ -68,7 +68,7 @@ class TestMrpackPackager:
             output_name="pack", mrpack_mode="download",
         )
 
-        artifact = await packager.package(_plan(), spec, TARGET, tmp_path)
+        artifact = await packager.package(_plan(), spec, tmp_path / TARGET.dir_name, tmp_path / f"{spec.output_name}.mrpack")
 
         assert artifact.format == "mrpack"
         assert artifact.target == TARGET
@@ -88,7 +88,7 @@ class TestMrpackPackager:
         )
         plan = _plan(artifacts=[_artifact("a.jar"), _artifact("b.jar")])
 
-        artifact = await packager.package(plan, spec, TARGET, tmp_path)
+        artifact = await packager.package(plan, spec, tmp_path / TARGET.dir_name, tmp_path / f"{spec.output_name}.mrpack")
 
         with zipfile.ZipFile(artifact.path) as zf:
             manifest = json.loads(zf.read("modrinth.index.json"))
@@ -114,7 +114,7 @@ class TestMrpackPackager:
                       url="file:///x/config.toml"),
         ])
 
-        artifact = await packager.package(plan, spec, TARGET, tmp_path)
+        artifact = await packager.package(plan, spec, tmp_path / TARGET.dir_name, tmp_path / f"{spec.output_name}.mrpack")
 
         with zipfile.ZipFile(artifact.path) as zf:
             assert "overrides/config.toml" in zf.namelist()
@@ -139,7 +139,7 @@ class TestMrpackPackager:
             format="mrpack", target=TARGET,
             output_name="pack", mrpack_mode="download",
         )
-        artifact = await packager.package(_plan(), spec, TARGET, tmp_path)
+        artifact = await packager.package(_plan(), spec, tmp_path / TARGET.dir_name, tmp_path / f"{spec.output_name}.mrpack")
 
         with zipfile.ZipFile(artifact.path) as zf:
             manifest = json.loads(zf.read("modrinth.index.json"))
@@ -152,7 +152,7 @@ class TestZipPackager:
         packager = ZipPackager()
         spec = OutputSpec(format="zip", target=TARGET, output_name="archive")
 
-        artifact = await packager.package(_plan(), spec, TARGET, tmp_path)
+        artifact = await packager.package(_plan(), spec, tmp_path / TARGET.dir_name, tmp_path / f"{spec.output_name}.zip")
 
         assert artifact.format == "zip"
         assert artifact.size > 0
@@ -165,7 +165,7 @@ class TestZipPackager:
         spec = OutputSpec(format="zip", target=TARGET, output_name="archive")
 
         with pytest.raises(PackagerError):
-            await packager.package(_plan(), spec, TARGET, tmp_path)
+            await packager.package(_plan(), spec, tmp_path / TARGET.dir_name, tmp_path / f"{spec.output_name}.zip")
 
 
 class TestDispatcher:
@@ -179,12 +179,12 @@ class TestDispatcher:
         mrpack = await dispatcher.package(
             _plan(),
             OutputSpec(format="mrpack", target=TARGET, output_name="p"),
-            TARGET, tmp_path,
+            tmp_path / TARGET.dir_name, tmp_path / "p.mrpack",
         )
         zip_out = await dispatcher.package(
             _plan(),
             OutputSpec(format="zip", target=TARGET, output_name="z"),
-            TARGET, tmp_path,
+            tmp_path / TARGET.dir_name, tmp_path / "z.zip",
         )
 
         assert mrpack.path.endswith(".mrpack")
@@ -196,5 +196,5 @@ class TestDispatcher:
             await dispatcher.package(
                 _plan(),
                 OutputSpec(format="7z", target=TARGET, output_name="x"),
-                TARGET, tmp_path,
+                tmp_path / TARGET.dir_name, tmp_path / "x.7z",
             )
