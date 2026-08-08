@@ -33,6 +33,7 @@ class TestParseToml:
         assert config.max_concurrent == 5
         assert config.max_retries == 3
         assert config.retry_delay == 1.0
+        assert config.verify_ssl is True
         assert config.output.format == [OutputFormat.MRPACK]
         assert config.output.mrpack_modes == [MrpackMode.DOWNLOAD]
         assert config.metadata.name == "TestPack"
@@ -194,6 +195,25 @@ class TestRoundTrip:
         assert restored.minecraft.mod_loader == config.minecraft.mod_loader
         assert restored.output.format == config.output.format
         assert restored.metadata.name == config.metadata.name
+        # verify_ssl 必须保留（round-trip 不丢配置）
+        assert restored.verify_ssl == config.verify_ssl
+
+    def test_parse_verify_ssl_false(self):
+        """verify_ssl=false 应被 from_dict 读取（不回退默认 True）"""
+        config = ModFetchConfig.from_dict(
+            {
+                "minecraft": {"version": ["1.21.1"], "mods": ["sodium"]},
+                "verify_ssl": False,
+            }
+        )
+        assert config.verify_ssl is False
+
+    def test_verify_ssl_default_true(self):
+        """未配置 verify_ssl 时默认 True"""
+        config = ModFetchConfig.from_dict(
+            {"minecraft": {"version": ["1.21.1"], "mods": ["sodium"]}}
+        )
+        assert config.verify_ssl is True
 
     def test_extra_url_filetype_file(self):
         """extra_urls 中 FileType 默认值"""

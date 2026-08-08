@@ -123,7 +123,13 @@ class ExecuteBuild:
             f" (并发={options.max_concurrent}, 物化={options.link_mode})"
         )
 
-        max_concurrent = options.max_concurrent or self._max_concurrent
+        # 并发值：非 None 时透传 BuildOptions 的值（含 0/负数——由
+        # DownloadExecutor.run() 校验拒绝，避免 `or` 把 0 静默吞成默认值）
+        max_concurrent = (
+            options.max_concurrent
+            if options.max_concurrent is not None
+            else self._max_concurrent
+        )
         outputs: List[OutputArtifact] = []
         errors: List[BuildError] = []
         total_downloaded = 0
@@ -162,7 +168,17 @@ class ExecuteBuild:
                         )
                     )
 
-                # -- 2. 物化 target 工作区（下载成功才做）--
+                # -- 2/3. 物化 + 打包（仅下载全部成功才执行）--
+                # 下载存在失败时跳过整个 target 的物化与打包，避免产出
+                # 缺少部分模组的残缺可分发产物（比报错更隐蔽）。
+                if report.failures:
+                    logger.warning(
+                        f"[执行] target {target.dir_name} 有 "
+                        f"{len(report.failures)} 个下载失败，跳过物化与打包"
+                    )
+                    continue
+
+                # -- 2. 物化 target 工作区 --
                 errors.extend(
                     await self._materialize_target(
                         plan, target, layout, options.link_mode

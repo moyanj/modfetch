@@ -87,6 +87,40 @@ class TestExitCodes:
         result = runner.invoke(main, ["build", "-c", "/nonexistent/mods.toml"])
         assert result.exit_code != 0
 
+    def test_cli_check_resolves_from_inheritance(
+        self, runner, config_file, monkeypatch, tmp_path
+    ):
+        """CLI 应合并 file:// 父配置，而非仅解析当前子配置。"""
+        parent = tmp_path / "parent.toml"
+        parent.write_text(
+            "[minecraft]\n"
+            'version = ["1.21.1"]\n'
+            'mod_loader = "fabric"\n'
+            'mods = ["sodium"]\n',
+            encoding="utf-8",
+        )
+        child = (
+            f'from = [{{ url = "{parent.as_uri()}", format = "toml" }}]\n'
+            "[minecraft]\n"
+            'mods = ["modmenu"]\n'
+        )
+        captured = {}
+
+        async def capture_remote(self, config, catalog, features=None):
+            captured["versions"] = config.minecraft.version
+            captured["mods"] = config.minecraft.mods
+            return ConfigValidationResult(valid=True)
+
+        monkeypatch.setattr(
+            cli_module.ConfigService, "validate_remote", capture_remote
+        )
+
+        result = runner.invoke(main, ["check", "-c", config_file(child)])
+
+        assert result.exit_code == 0, result.output
+        assert captured["versions"] == ["1.21.1"]
+        assert captured["mods"] == ["sodium", "modmenu"]
+
     def test_cli_check_exit_zero(
         self, runner, config_file, monkeypatch, mock_modrinth, tmp_path
     ):

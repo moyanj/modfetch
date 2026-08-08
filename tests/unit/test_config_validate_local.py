@@ -52,6 +52,21 @@ class TestValidate:
     def test_validate_multi_loader(self):
         _make_config(mod_loader=["fabric", "forge"]).validate()
 
+    @pytest.mark.parametrize("max_concurrent", [0, -1])
+    def test_validate_rejects_non_positive_max_concurrent(
+        self, max_concurrent: int
+    ):
+        """非正下载并发数应在本地校验阶段拒绝，而非进入执行器后挂起。"""
+        config = ModFetchConfig.from_dict(
+            {
+                "minecraft": {"version": ["1.21.1"], "mods": ["sodium"]},
+                "max_concurrent": max_concurrent,
+            }
+        )
+
+        with pytest.raises(ValueError, match="max_concurrent 必须为正整数"):
+            config.validate()
+
 
 class TestPostInit:
     def test_extra_url_requires_url(self):

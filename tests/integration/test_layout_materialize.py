@@ -238,3 +238,42 @@ async def test_download_failure_skips_materialize(tmp_path):
     assert materialize_errors == [], "下载失败不应再报物化错误"
     # 工作区不出现失败制品的残影
     assert not layout.workspace_for(TARGET, "mods/a.jar").exists()
+
+
+class _RecordingPackager:
+    """记录 package 调用次数的桩打包器（验证失败时不应被调用）"""
+
+    def __init__(self, source_dir: Path):
+        self.package_calls = 0
+        self._source_dir = source_dir
+
+    async def package(self, plan, spec, source_dir: Path, output_path: Path):
+        self.package_calls += 1
+        # 物化失败的 target 工作区为空/缺失，不应到达打包
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"artifact")
+        return type("A", (), {
+            "path": str(output_path), "format": spec.format,
+            "target": spec.target, "size": 1,
+        })()
+
+
+async def test_download_failure_skips_packaging(tmp_path):
+    """下载失败 → 跳过该 target 的打包：不产出残缺产物，outputs 不含失败路径"""
+    artifacts = [_artifact("a.jar")]
+    spec = OutputSpec(format="zip", target=TARGET, output_name="pack")
+    plan = _plan(artifacts, [spec])
+    layout = BuildLayout(tmp_path / "dl")
+    downloader = _FailingDownloader("下载失败: 校验失败")
+    packager = _RecordingPackager(layout.target_build_dir(TARGET))
+
+    exec_ = ExecuteBuild(downloader, packager)
+    result = await exec_.execute(
+        plan, "job", _NoopSink(), BuildOptions(layout=layout)
+    )
+
+    # 下载失败已记录错误，但打包必须被跳过
+    assert [e for e in result.errors if e.phase == "download"]
+    assert packager.package_calls == 0, "下载失败不应触发打包"
+    assert result.outputs == (), "下载失败时 outputs 不应包含产物路径"
+    assert not layout.output_path(spec).exists(), "dist 不应留下残缺产物"

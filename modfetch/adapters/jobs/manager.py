@@ -121,6 +121,7 @@ class JobApplicationService:
                 max_concurrent=config.max_concurrent,
                 max_retries=config.max_retries,
                 retry_delay=config.retry_delay,
+                verify_ssl=config.verify_ssl,
             )
             try:
                 result = await service.execute(

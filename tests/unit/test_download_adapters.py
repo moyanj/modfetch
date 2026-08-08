@@ -110,6 +110,16 @@ class TestHttpDownloaderLocal:
 
 
 class TestDownloadExecutor:
+    async def test_reject_non_positive_concurrency(self, downloader):
+        """max_concurrent 为 0 或负数 → run() 拒绝（防止 queue.join 永久挂起）"""
+        executor = DownloadExecutor(downloader, max_concurrent=0)
+        with pytest.raises(ValueError, match="max_concurrent 必须为正整数"):
+            await executor.run()
+
+        executor = DownloadExecutor(downloader, max_concurrent=-1)
+        with pytest.raises(ValueError, match="max_concurrent 必须为正整数"):
+            await executor.run()
+
     async def test_mixed_outcomes_visible(self, downloader, tmp_path, fake_jar):
         """成功/失败任务都在报告中可见（旧 worker 吞异常的回归测试）"""
         executor = DownloadExecutor(downloader, max_concurrent=2)

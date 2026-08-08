@@ -125,7 +125,15 @@ class DownloadExecutor:
         ``queue.join()`` 等待所有任务完成；最终统一取消 worker。
         失败任务不会中断整个批次——每个任务的结果独立记录在
         _results 中，由调用方通过报告决定后续处理。
+
+        Raises:
+            ValueError: max_concurrent 非正（0 或负数会产生零个 worker，
+                导致 queue.join() 永久挂起，必须拒绝并给出可诊断错误）
         """
+        if self._max_concurrent < 1:
+            raise ValueError(
+                f"max_concurrent 必须为正整数，当前值: {self._max_concurrent}"
+            )
         logger.info(f"[启动] 下载执行器启动，最大并发数: {self._max_concurrent}")
         self._workers = [
             asyncio.create_task(self._worker(), name=f"download-worker-{i}")

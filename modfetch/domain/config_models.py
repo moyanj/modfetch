@@ -357,6 +357,7 @@ class ModFetchConfig:
             max_concurrent=config_dict.get("max_concurrent", 5),
             max_retries=config_dict.get("max_retries", 3),
             retry_delay=config_dict.get("retry_delay", 1.0),
+            verify_ssl=config_dict.get("verify_ssl", True),
             features=config_dict.get("features", []),
             parent_configs=parent_configs,
             plugins=plugin_config,
@@ -491,6 +492,7 @@ class ModFetchConfig:
             "max_concurrent": self.max_concurrent,
             "max_retries": self.max_retries,
             "retry_delay": self.retry_delay,
+            "verify_ssl": self.verify_ssl,
             "features": self.features,
             "from": (
                 [
@@ -532,6 +534,11 @@ class ModFetchConfig:
 
     def validate(self) -> None:
         """验证配置完整性（本地校验，不涉及远程 API）"""
+        if self.max_concurrent < 1:
+            raise ValueError(
+                f"max_concurrent 必须为正整数，当前值: {self.max_concurrent}"
+            )
+
         if not self.minecraft.version:
             raise ValueError("必须配置 Minecraft 版本")
 

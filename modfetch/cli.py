@@ -17,26 +17,36 @@ import click
 from loguru import logger
 
 from modfetch import __version__
-from modfetch.adapters.config import get_config_source
+from modfetch.adapters.config import get_config_source, load_with_inheritance
 from modfetch.adapters.modrinth import ModrinthClient
 from modfetch.application.config_service import ConfigService
 from modfetch.application.validation import format_validation_issues
 from modfetch.composition import create_build_service
+from modfetch.domain.config_models import ModFetchConfig
 from modfetch.domain.errors import ModFetchError, PluginError
 from modfetch.logger import setup_logger
 from modfetch.plugins import PluginManager, PluginLoader
 from modfetch.plugins.lua_loader import LuaPluginLoader
 
 
-def load_config(config_path: str) -> dict:
-    """加载配置文件（按后缀分发到对应 ConfigSource）"""
+async def load_config(config_path: str) -> ModFetchConfig:
+    """加载配置文件（含 from 继承链解析）
+
+    按后缀分发到对应 ConfigSource 读取原始字典，再经
+    load_with_inheritance 递归合并父配置（file:// 本地或 http(s)://
+    远程），最终转为领域模型。
+
+    Raises:
+        click.ClickException: 文件不存在，或继承/解析失败
+    """
     path = Path(config_path)
 
     if not path.exists():
         raise click.ClickException(f"配置文件不存在: {config_path}")
 
     try:
-        return dict(get_config_source(path).load(path))
+        raw = dict(get_config_source(path).load(path))
+        return await load_with_inheritance(raw)
     except ValueError as e:
         raise click.ClickException(str(e)) from e
 
@@ -122,9 +132,9 @@ async def _load_config_and_validate(
         features: CLI 传入的功能标签（覆盖配置顶层 features 默认值）
         plugin_loader: Python 插件加载器（负责 .py，用于配置内插件）
     """
-    # 加载配置（统一配置边界: 解析 → 本地校验）
+    # 加载配置（统一配置边界: 继承合并 → 领域模型 → 本地校验）
     config_service = ConfigService()
-    config = config_service.parse(load_config(config_path))
+    config = await load_config(config_path)
     # 显式传入 CLI 的功能标签做本地校验（含跨字段条件编译判断），
     # 此时 config.features 尚未被 --feature 覆盖，必须显式传参
     config_service.validate_local(config, features or None)
@@ -337,8 +347,7 @@ async def run_plugins(plugins: list[str], plugin_dir: Optional[str]):
 @_handle_cli_errors
 async def run_clean(config_path: str, clean_cache: bool):
     """清理构建工作区（可选 --cache 同时清理全局缓存）"""
-    config_service = ConfigService()
-    config = config_service.parse(load_config(config_path))
+    config = await load_config(config_path)
 
     from modfetch.application.build_layout import BuildLayout, clean_layout
 
