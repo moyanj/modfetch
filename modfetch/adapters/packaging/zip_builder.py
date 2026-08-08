@@ -2,8 +2,12 @@
 ZIP 构建器（自 packager.zip 迁移）
 
 实现目录压缩功能。
+
+压缩操作（``shutil.make_archive``）为 CPU + 同步 IO 密集，移入
+``asyncio.to_thread`` 在事件循环外执行，避免阻塞 Web 端其他并发任务。
 """
 
+import asyncio
 import os
 import shutil
 from typing import Optional
@@ -43,17 +47,23 @@ class ZipBuilder:
         try:
             if archive_name is None:
                 archive_name = os.path.basename(source_dir)
-
             zip_path = os.path.join(output_path, archive_name)
 
-            # 创建压缩文件（shutil.make_archive 自动追加 .zip 后缀）
-            shutil.make_archive(zip_path, "zip", source_dir)
-
-            return f"{zip_path}.zip"
-
+            # 压缩为同步 IO，移入 worker 线程避免阻塞事件循环
+            return await asyncio.to_thread(
+                self._zip_sync, zip_path, source_dir
+            )
         except Exception as e:
             # 统一包装为 ZipError，附带上下文供调用方定位
             raise ZipError(
                 f"构建 ZIP 失败: {e}",
                 context={"source_dir": source_dir, "output_path": output_path},
             )
+
+    def _zip_sync(self, zip_path: str, source_dir: str) -> str:
+        """同步压缩（worker 线程内执行）
+
+        shutil.make_archive 自动追加 .zip 后缀。
+        """
+        shutil.make_archive(zip_path, "zip", source_dir)
+        return f"{zip_path}.zip"

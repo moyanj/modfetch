@@ -2,14 +2,17 @@
 Mrpack 构建器（自 packager.mrpack 迁移）
 
 实现 Modrinth 标准整合包 (.mrpack) 的生成。
+
+文件操作（复制/压缩/删除）属于同步阻塞 IO，全部移入
+``asyncio.to_thread`` 在事件循环外执行，避免阻塞 Web 端
+其他并发 job 与 WS 推送。
 """
 
+import asyncio
 import json
 import os
 import shutil
 from typing import Optional
-
-import aiofiles
 
 from modfetch.domain.config_models import ModLoader
 from modfetch.domain.errors import MrpackError
@@ -49,56 +52,74 @@ class MrpackBuilder:
             生成的文件路径
         """
         try:
-            # 创建临时目录（先清理残留，保证每次构建从干净状态开始）
-            temp_dir = f"{output_path}_temp"
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
-            os.makedirs(temp_dir, exist_ok=True)
-
-            # 创建 overrides 目录：存放直接覆盖游戏目录的文件
-            # （config/、mods/ 下的静态文件），不参与 manifest 文件引用
-            overrides_dir = os.path.join(temp_dir, "overrides")
-            os.makedirs(overrides_dir, exist_ok=True)
-
-            # 生成 manifest（modrinth.index.json 内容）
+            # manifest 构造为纯内存操作，在事件循环内完成（快）
             manifest = self._create_manifest(
                 metadata, mc_version, mod_loader, loader_version
             )
-
             if files:
                 # REFERENCE 模式：文件仅以引用写入 manifest.files，不物理复制
                 manifest["files"] = files
 
-            # 写入 manifest.json（mrpack 规范要求的根级索引文件）
-            manifest_path = os.path.join(temp_dir, "modrinth.index.json")
-            async with aiofiles.open(manifest_path, "w", encoding="utf-8") as f:
-                await f.write(json.dumps(manifest, indent=4))
-
-            # 复制文件到 overrides（DOWNLOAD 模式：模组/资源文件物理落盘于此）
-            if os.path.exists(source_dir) and any(os.listdir(source_dir)):
-                await self._copy_to_overrides(source_dir, overrides_dir)
-
-            # 创建 zip 文件（以临时目录为归档根，避免多余的外层目录）
-            zip_path = f"{output_path}.zip"
-            shutil.make_archive(output_path, "zip", temp_dir)
-
-            # 重命名为 .mrpack（mrpack 本质是含 modrinth.index.json 的 zip）
-            mrpack_path = f"{output_path}.mrpack"
-            if os.path.exists(mrpack_path):
-                os.remove(mrpack_path)
-            shutil.move(zip_path, mrpack_path)
-
-            # 清理临时目录
-            shutil.rmtree(temp_dir)
-
-            return mrpack_path
-
+            # 全部文件 IO（建目录/复制/压缩/move）移入 worker 线程，
+            # 避免阻塞事件循环；in-flight 期间事件循环仍可服务其他 job。
+            return await asyncio.to_thread(
+                self._build_sync,
+                source_dir,
+                output_path,
+                manifest,
+            )
         except Exception as e:
             # 统一包装为 MrpackError，附带上下文供调用方定位
             raise MrpackError(
                 f"构建 mrpack 失败: {e}",
                 context={"source_dir": source_dir, "output_path": output_path},
             )
+
+    def _build_sync(
+        self,
+        source_dir: str,
+        output_path: str,
+        manifest: dict,
+    ) -> str:
+        """同步文件构建流程（在 worker 线程中执行）
+
+        仅做磁盘 IO 与压缩，不触碰事件循环；manifest 已由调用方
+        在事件循环内构造完毕，此处直接落盘。
+        """
+        # 创建临时目录（先清理残留，保证每次构建从干净状态开始）
+        temp_dir = f"{output_path}_temp"
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        os.makedirs(temp_dir, exist_ok=True)
+
+        # 创建 overrides 目录：存放直接覆盖游戏目录的文件
+        # （config/、mods/ 下的静态文件），不参与 manifest 文件引用
+        overrides_dir = os.path.join(temp_dir, "overrides")
+        os.makedirs(overrides_dir, exist_ok=True)
+
+        # 写入 manifest.json（mrpack 规范要求的根级索引文件）
+        manifest_path = os.path.join(temp_dir, "modrinth.index.json")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=4)
+
+        # 复制文件到 overrides（DOWNLOAD 模式：模组/资源文件物理落盘于此）
+        if os.path.exists(source_dir) and any(os.listdir(source_dir)):
+            self._copy_to_overrides(source_dir, overrides_dir)
+
+        # 创建 zip 文件（以临时目录为归档根，避免多余的外层目录）
+        zip_path = f"{output_path}.zip"
+        shutil.make_archive(output_path, "zip", temp_dir)
+
+        # 重命名为 .mrpack（mrpack 本质是含 modrinth.index.json 的 zip）
+        mrpack_path = f"{output_path}.mrpack"
+        if os.path.exists(mrpack_path):
+            os.remove(mrpack_path)
+        shutil.move(zip_path, mrpack_path)
+
+        # 清理临时目录
+        shutil.rmtree(temp_dir)
+
+        return mrpack_path
 
     def _create_manifest(
         self,
@@ -131,8 +152,8 @@ class MrpackBuilder:
             "dependencies": dependencies,
         }
 
-    async def _copy_to_overrides(self, source_dir: str, overrides_dir: str):
-        """复制文件到 overrides 目录
+    def _copy_to_overrides(self, source_dir: str, overrides_dir: str):
+        """复制文件到 overrides 目录（worker 线程内执行）
 
         保持 source_dir 的目录结构映射到 overrides/ 下（逐层建目录、
         逐个文件 copy2）。
