@@ -36,6 +36,7 @@ mods = [
     "i18nupdatemod",
     "distanthorizons",
     "controlling",
+    { slug = "modernfix", only_version = "1.21.4" },
     "no-chat-reports",
     "krypton",
 ]

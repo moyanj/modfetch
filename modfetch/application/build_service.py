@@ -108,10 +108,10 @@ class BuildApplicationService:
         self._config_service.validate_local(config)
         await self._publish(sink, job_id, EventType.CONFIG_VALIDATED)
 
-        # 2. 远程校验
+        # 2. 远程校验（features 已由 CLI -f 覆盖进 config.features）
         if not skip_remote_validation:
             report = await self._config_service.validate_remote(
-                config, self._plan_build.catalog
+                config, self._plan_build.catalog, features=config.features
             )
             if not report.is_valid:
                 message = format_validation_issues(report.issues)

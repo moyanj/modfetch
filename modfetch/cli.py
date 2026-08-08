@@ -189,7 +189,9 @@ async def run_async(
                             logger.warning(f"从配置加载插件 {plugin_name} 失败: {e}")
             # 远程校验
             async with ModrinthClient() as client:
-                report = await config_service.validate_remote(config, client)
+                report = await config_service.validate_remote(
+                    config, client, features=features
+                )
                 if not report.is_valid:
                     raise click.ClickException(format_validation_issues(report.issues))
 

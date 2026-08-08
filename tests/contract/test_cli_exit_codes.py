@@ -14,7 +14,7 @@ from modfetch.application.validation import ConfigValidationResult
 from modfetch.cli import main
 
 
-async def _fake_validate_remote(self, config, catalog):
+async def _fake_validate_remote(self, config, catalog, features=None):
     """跳过远程校验的测试桩"""
     return ConfigValidationResult(valid=True)
 

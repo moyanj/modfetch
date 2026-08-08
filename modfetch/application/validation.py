@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Union
 
 from modfetch.adapters.modrinth.facets import build_modrinth_facets  # noqa: F401 (兼容再导出)
+from modfetch.application.version_matcher import VersionMatcher
 from modfetch.domain.config_models import ModEntry, ModFetchConfig
 from modfetch.domain.errors import ConfigValidationError
 from modfetch.domain.models import ProjectType
@@ -63,13 +64,27 @@ class ProjectValidationService:
 
     def __init__(self, catalog: CatalogPort):
         self.catalog = catalog
+        #: 条件条目过滤（only_version/feature）——按版本粒度判断条目是否参与
+        self._matcher = VersionMatcher()
 
-    async def validate_config(self, config: ModFetchConfig) -> ConfigValidationResult:
+    async def validate_config(
+        self,
+        config: ModFetchConfig,
+        features: Optional[List[str]] = None,
+    ) -> ConfigValidationResult:
         """校验配置中全部 mods/resourcepacks/shaderpacks 条目（并发）
 
         为每个条目构造校验任务并经 asyncio.gather 并发执行，
         单条失败不中断其余条目；返回聚合报告。
+
+        Args:
+            config: 待校验配置
+            features: 启用的功能标签；省略时使用
+                ``config.features``。仅通过 only_version/feature
+                条件过滤的版本才会参与兼容性检查（与计划生成阶段的
+                VersionMatcher 行为保持一致，避免误报不兼容）。
         """
+        features = features if features is not None else config.features
         loaders = self._loader_values(config)
 
         # 构造 (entry, entry_type, field, loaders) 任务列表
@@ -82,6 +97,7 @@ class ProjectValidationService:
                     field=f"minecraft.mods[{index}]",
                     mc_versions=config.minecraft.version,
                     loaders=loaders,
+                    features=features,
                 )
             )
         for index, entry in enumerate(config.minecraft.resourcepacks):
@@ -92,6 +108,7 @@ class ProjectValidationService:
                     field=f"minecraft.resourcepacks[{index}]",
                     mc_versions=config.minecraft.version,
                     loaders=[""],
+                    features=features,
                 )
             )
         for index, entry in enumerate(config.minecraft.shaderpacks):
@@ -102,6 +119,7 @@ class ProjectValidationService:
                     field=f"minecraft.shaderpacks[{index}]",
                     mc_versions=config.minecraft.version,
                     loaders=[""],
+                    features=features,
                 )
             )
 
@@ -117,8 +135,20 @@ class ProjectValidationService:
         field: str,
         mc_versions: Iterable[str],
         loaders: Iterable[str],
+        features: Optional[List[str]] = None,
     ) -> Optional[ValidationIssue]:
         """校验单个条目: 存在性 → 类型 → 版本×加载器兼容性
+
+        Args:
+            entry: 待校验条目（字符串或 ModEntry 对象）
+            entry_type: 条目类型（mod/resourcepack/shaderpack）
+            field: 配置中的定位字段（如 "minecraft.mods[0]"）
+            mc_versions: 配置声明的全部 Minecraft 版本
+            loaders: 参与校验的加载器列表；空串表示不按加载器过滤
+                （资源包/光影包仅按版本判定）
+            features: 启用的功能标签；None 时对有 only_version/feature
+                条件的条目依然要参与校验——本方法不自行过滤，
+                由 validate_config 注入。
 
         Returns:
             None 表示通过；否则返回对应的 ValidationIssue
@@ -163,7 +193,17 @@ class ProjectValidationService:
 
         pinned_version = entry.version if isinstance(entry, ModEntry) else None
 
-        # 版本×加载器兼容性检查并发执行
+        # 版本×加载器兼容性检查并发执行。
+        # 按版本粒度先过 only_version/feature 条件过滤：仅当条目在
+        # 该版本实际生效时，才要求存在可用版本（与计划生成阶段
+        # VersionMatcher.should_include 一致，避免误报不兼容）。
+        applied_features = features or []
+        pending_versions = [
+            mc_version
+            for mc_version in mc_versions
+            if self._matcher.should_include(entry, mc_version, applied_features)
+        ]
+
         async def _check(mc_version: str, loader: str) -> Optional[str]:
             version_info, file_info = await self.catalog.get_version(
                 project.id,
@@ -177,7 +217,7 @@ class ProjectValidationService:
 
         checks = [
             _check(mc_version, loader)
-            for mc_version in mc_versions
+            for mc_version in pending_versions
             for loader in loaders
         ]
         incompatible = [r for r in await asyncio.gather(*checks) if r is not None]

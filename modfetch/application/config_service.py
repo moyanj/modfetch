@@ -116,15 +116,23 @@ class ConfigService:
                 )
 
     async def validate_remote(
-        self, config: ModFetchConfig, catalog: CatalogPort
+        self,
+        config: ModFetchConfig,
+        catalog: CatalogPort,
+        features: Optional[List[str]] = None,
     ) -> ConfigValidationResult:
         """远程校验: 逐条目查平台，返回结构化报告（不抛异常）
 
         Args:
             config: 待校验配置
             catalog: 目录端口（Modrinth 等平台实现）
+            features: 启用的功能标签；省略时使用 ``config.features``。
+                仅通过 only_version/feature 条件过滤的版本才会参与
+                兼容性检查（与 validate_local/计划生成阶段一致）。
 
         Returns:
             ConfigValidationResult: valid/issues，调用方据 issues 自行处理
         """
-        return await ProjectValidationService(catalog).validate_config(config)
+        return await ProjectValidationService(catalog).validate_config(
+            config, features
+        )
