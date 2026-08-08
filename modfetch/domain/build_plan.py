@@ -174,7 +174,7 @@ class BuildPlan:
         Returns:
             写入的绝对路径字符串
 
-        供 CLI（--plan-out）、Web 或外部工具持久化构建计划使用。
+        供 CLI（modfetch plan -o）、Web 或外部工具持久化构建计划使用。
         """
         from pathlib import Path
 

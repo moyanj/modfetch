@@ -1,4 +1,4 @@
-"""CLI 退出码契约测试
+"""CLI 退出码契约测试（子命令风格: build / check）
 
 契约:
 - 成功 → 0
@@ -69,34 +69,34 @@ class TestExitCodes:
             cli_module.ConfigService, "validate_remote", _fake_validate_remote
         )
 
-        result = runner.invoke(main, [config_file(VALID_CONFIG)])
+        result = runner.invoke(main, ["build", "-c", config_file(VALID_CONFIG)])
         assert result.exit_code == 0, result.output
 
     def test_cli_config_error_nonzero(self, runner, config_file):
         """缺少 version → exit code 非 0"""
-        result = runner.invoke(main, [config_file(INVALID_CONFIG_NO_VERSION)])
+        result = runner.invoke(main, ["build", "-c", config_file(INVALID_CONFIG_NO_VERSION)])
         assert result.exit_code != 0
 
     def test_cli_config_error_no_content_nonzero(self, runner, config_file):
         """无任何内容条目 → exit code 非 0"""
-        result = runner.invoke(main, [config_file(INVALID_CONFIG_NO_CONTENT)])
+        result = runner.invoke(main, ["build", "-c", config_file(INVALID_CONFIG_NO_CONTENT)])
         assert result.exit_code != 0
 
     def test_cli_missing_file_nonzero(self, runner):
         """配置文件不存在 → exit code 非 0"""
-        result = runner.invoke(main, ["/nonexistent/mods.toml"])
+        result = runner.invoke(main, ["build", "-c", "/nonexistent/mods.toml"])
         assert result.exit_code != 0
 
-    def test_cli_dry_run_exit_zero(
+    def test_cli_check_exit_zero(
         self, runner, config_file, monkeypatch, mock_modrinth, tmp_path
     ):
-        """dry-run 模式配置合法 → exit code 0"""
+        """check 模式配置合法 → exit code 0"""
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(
             cli_module.ConfigService, "validate_remote", _fake_validate_remote
         )
 
-        result = runner.invoke(main, [config_file(VALID_CONFIG), "--dry-run"])
+        result = runner.invoke(main, ["check", "-c", config_file(VALID_CONFIG)])
         assert result.exit_code == 0, result.output
 
     def test_cli_no_feature_keeps_config_default(
@@ -128,7 +128,7 @@ download_dir = "{tmp_path}/dl"
 format = ["mrpack"]
 """
 
-        result = runner.invoke(main, [config_file(config), "--dry-run"])
+        result = runner.invoke(main, ["check", "-c", config_file(config)])
         assert result.exit_code == 0, result.output
         # 未覆盖 config.features；校验也未显式覆盖成空列表
         assert captured["config_features"] == ["performance"]
@@ -164,7 +164,7 @@ format = ["mrpack"]
 """
 
         result = runner.invoke(
-            main, [config_file(config), "-f", "shaders", "--dry-run"]
+            main, ["check", "-c", config_file(config), "-f", "shaders"]
         )
         assert result.exit_code == 0, result.output
         assert captured["config_features"] == ["shaders"]
@@ -191,5 +191,5 @@ format = ["mrpack"]
             cli_module.ConfigService, "validate_remote", _fake_validate_remote
         )
 
-        result = runner.invoke(main, [config_file(config)])
+        result = runner.invoke(main, ["build", "-c", config_file(config)])
         assert result.exit_code != 0

@@ -3,7 +3,7 @@
 #
 # 用途：演示配置文件的最简骨架——只需 metadata + minecraft + output
 # 三节即可跑通一次完整构建。把本文件复制为 mods.toml 后执行：
-#     uv run modfetch mods.toml
+#     uv run modfetch build
 # =====================================================================
 
 [metadata]

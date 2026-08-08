@@ -57,8 +57,9 @@ Minecraft 模组下载/打包工具：Python 后端（modfetch/）+ Vue 3 前端
 ```bash
 uv sync --dev            # 安装依赖（dev 组：nuitka/pytest/pytest-asyncio）
 uv run modfetch          # 运行 CLI（入口已修复为 modfetch.__main__:main）
-uv run modfetch --clean-cache   # 清理全局缓存（显式命令）
-uv run modfetch --clean-build   # 清理打包工作区（保留缓存）
+uv run modfetch build    # 构建（默认读取当前目录 mods.toml，-c 覆盖）
+uv run modfetch check    # 校验配置（不下载/打包）
+uv run modfetch clean --cache   # 清理构建工作区 + 全局缓存
 uv run pytest            # 测试（pytest-asyncio auto 模式）
 uv run nuitka_build.py   # Nuitka → modfetch.bin（CI 同款；不是 python build.py）
 ```

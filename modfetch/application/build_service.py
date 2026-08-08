@@ -63,7 +63,7 @@ class BuildApplicationService:
     async def plan(self, config: ModFetchConfig, job_id: str) -> BuildPlan:
         """生成构建计划（不执行下载/打包）
 
-        供 Web 预览、CLI --dry-run 或外部工具消费计划内容；返回的
+        供 Web 预览、CLI `modfetch plan` 或外部工具消费计划内容；返回的
         BuildPlan 可通过 to_dict()/to_json()/to_file() 序列化输出。
         """
         plan, _report = await self._plan_build.execute(

@@ -28,7 +28,7 @@
 **ModFetch 把这一切压缩成一条命令。** 你只需要在配置文件里列出模组名，剩下的——查版本、匹配加载器、解析依赖、并发下载、打包 `.mrpack` / `.zip`——全部自动完成。
 
 ```bash
-modfetch mods.toml   # 完事。去 downloads/dist/ 拿整合包。
+modfetch build   # 完事。去 downloads/dist/ 拿整合包。
 ```
 
 ---
@@ -122,13 +122,14 @@ format = ["mrpack", "zip"]      # .mrpack 和 .zip 一起出
 一条命令，开始构建：
 
 ```bash
-uv run modfetch mods.toml
+uv run modfetch build             # 使用当前目录 mods.toml 构建
+uv run modfetch build -c other.toml   # 指定其他配置文件
 ```
 
 完成后，整合包就在 `./downloads/dist/` 里等你。🎉
 
-> 💡 常用参数：`--dry-run` 只校验不下载 · `--plan` 只生成构建计划 ·
-> `-f <feature>` 切换功能形态 · `--clean-cache` 清理下载缓存
+> 💡 其他命令：`modfetch check` 只校验不下载 · `modfetch plan -o plan.json` 生成构建计划 ·
+> `-f <feature>` 切换功能形态 · `modfetch clean --cache` 清理下载缓存
 
 ---
 

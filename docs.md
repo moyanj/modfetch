@@ -302,17 +302,34 @@ enabled = ["progress"]
 ## 🖥️ CLI 用法
 
 ```bash
-modfetch [OPTIONS] CONFIG
+modfetch [OPTIONS] COMMAND [ARGS]...
 
-选项:
-  -f, --feature TEXT    启用的功能标签（可多次；未传时保留配置顶层 features 默认值）
-  --plugin TEXT         加载插件（可多次；.lua 走 Lua loader，其余走 Python loader）
-  --plugin-dir TEXT     插件目录路径（递归扫描其中的 .py 与 .lua 文件）
-  --list-plugins        列出已加载的插件后返回
-  --dry-run             干运行模式（只校验配置，不实际下载/打包）
-  --debug               启用调试模式（DEBUG 日志）
-  --version             显示版本
-  --help                显示帮助
+命令:
+  build    执行完整构建（下载 + 打包）
+  plan     仅生成构建计划（不下载/打包）
+  check    校验配置（不下载、不打包）
+  plugins  列出已加载的插件
+  clean    清理构建工作区 / 全局缓存
+
+通用选项:
+  -c, --config TEXT    配置文件路径（默认: 当前目录 mods.toml）
+  -f, --feature TEXT   启用的功能标签（可多次；未传时保留配置顶层 features 默认值）
+  --plugin TEXT        加载插件（可多次；.lua 走 Lua loader，其余走 Python loader）
+  --plugin-dir TEXT    插件目录路径（递归扫描其中的 .py 与 .lua 文件）
+  --debug              启用调试模式（DEBUG 日志）
+  --version            显示版本
+  --help               显示帮助
+```
+
+示例：
+
+```bash
+modfetch build                  # 使用当前目录 mods.toml 构建
+modfetch build -c other.toml    # 指定其他配置文件
+modfetch check -c mods.toml     # 只校验配置，不下载/打包
+modfetch plan -o plan.json      # 生成构建计划到文件（默认输出到 stdout）
+modfetch clean --cache          # 清理构建工作区 + 全局缓存
+modfetch plugins --plugin-dir ./plugins   # 查看指定目录下加载了哪些插件
 ```
 
 > 注意：`-f/--feature` 与配置顶层 `features` 共同决定条件编译结果；
