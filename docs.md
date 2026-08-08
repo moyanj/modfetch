@@ -103,7 +103,7 @@ description = "包含高性能和高质量光影模组的 Minecraft 整合方案
 - `mods`、`resourcepacks`、`shaderpacks`：分别表示模组、资源包、光影包的列表
   - 四类条目（含 `extra_urls`）至少配置其一，否则校验失败
 - 每条目支持两种写法：
-  - **简洁写法（仅 ID 或 slug 字符串）**
+  - **简洁写法（仅 ID 或 slug 字符串）**：也可用 `slug@版本号` 语法直接固定版本
   - **详细写法（包含额外配置的字典结构）**
 
 详细字段说明（`mods` / `resourcepacks` / `shaderpacks` 通用）：
@@ -114,6 +114,16 @@ description = "包含高性能和高质量光影模组的 Minecraft 整合方案
 | `version`      | string（可选）          | 固定版本号（默认取该 MC 版本×加载器下的最新版本）           |
 | `only_version` | Array<String> 或 string （可选）| 当 Minecraft 版本匹配时才下载      |
 | `feature`      | Array<String> 或 string （可选） | 运行时特征标记（启用条件，见下）            |
+
+> **版本固定（`slug@version` 语法）**
+> - 简洁写法可直接附加版本号：`"sodium@0.6.0"` 与
+>   `{ id = "sodium", version = "0.6.0" }` 完全等价
+> - 版本号为**精确匹配**（接受 Modrinth 版本 ID 或版本号）；
+>   未命中时**不会降级**到最新版本，该条目会被跳过并在构建计划中标记，
+>   避免静默拿到错误版本
+> - 匹配仍受目标 MC 版本×加载器约束：固定版本必须同时支持当前构建目标，
+>   才会被采用（如 `"1.21.1"` 目标下 `"1.20.4"` 独占的版本不会被选到）
+> - 该语法同样适用于 `resourcepacks` 与 `shaderpacks` 条目
 
 > **条件编译语义（`only_version` 与 `feature`）**
 > - `only_version`：条目仅在声明的 Minecraft 版本下生效；列表时命中其一即可
@@ -181,7 +191,9 @@ mods = [
     { id = "iris", feature = "shaders" },
     # 简写形式（默认适用于所有版本、所有已启用 feature）
     "modmenu",
-    "rei"
+    "rei",
+    # 简写 + 版本固定（等价于 { id = "fabric-api", version = "0.100.0" }）
+    "fabric-api@0.100.0",
 ]
 
 resourcepacks = [
@@ -275,7 +287,8 @@ mods = [
     { id = "lithium", feature = "performance" },
     { id = "modmenu", feature = "utility" },
     { id = "fabric-api", sha1 = "a1b2c3d4e5f6ac231e45f787ac03fcd6be975b33" },
-    "rei"
+    # slug@version 语法固定版本
+    "rei@15.2.0"
 ]
 
 resourcepacks = [
