@@ -90,9 +90,7 @@ modfetch build   # 完事。去 downloads/dist/ 拿整合包。
 需要 **Python 3.10+**，推荐使用 [uv](https://docs.astral.sh/uv/)：
 
 ```bash
-git clone https://github.com/moyanj/modfetch.git
-cd modfetch
-uv sync --dev
+uv pip install modfetch
 ```
 
 写一份配置（更多示例见 [`examples/`](examples/)）：
