@@ -277,3 +277,31 @@ async def test_download_failure_skips_packaging(tmp_path):
     assert packager.package_calls == 0, "下载失败不应触发打包"
     assert result.outputs == (), "下载失败时 outputs 不应包含产物路径"
     assert not layout.output_path(spec).exists(), "dist 不应留下残缺产物"
+
+
+async def test_materialize_failure_skips_packaging(tmp_path, monkeypatch):
+    """物化失败 → 跳过该 target 的打包：不产出残缺产物，outputs 为空且 dist 无产物"""
+    import modfetch.application.execute_build as eb
+
+    artifacts = [_artifact("a.jar")]
+    spec = OutputSpec(format="zip", target=TARGET, output_name="pack")
+    plan = _plan(artifacts, [spec])
+    layout = BuildLayout(tmp_path / "dl")
+    downloader = _RecordingDownloader(b"content")
+
+    async def fail_link(src, dst):
+        raise eb.LayoutError("硬链接失败: 测试模拟 (Operation not permitted)")
+
+    monkeypatch.setattr(eb, "_link_artifact", fail_link)
+    packager = _RecordingPackager(layout.target_build_dir(TARGET))
+
+    exec_ = ExecuteBuild(downloader, packager)
+    result = await exec_.execute(
+        plan, "job", _NoopSink(), BuildOptions(layout=layout)
+    )
+
+    # 物化错误已记录（phase=materialize），但打包必须被跳过
+    assert [e for e in result.errors if e.phase == "materialize"]
+    assert packager.package_calls == 0, "物化失败不应触发打包"
+    assert result.outputs == (), "物化失败时 outputs 不应包含产物路径"
+    assert not layout.output_path(spec).exists(), "dist 不应留下残缺产物"

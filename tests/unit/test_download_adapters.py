@@ -1,5 +1,7 @@
 """下载适配器单元测试: RetryPolicy / FileArtifactStore / HttpDownloader / DownloadExecutor"""
 
+import hashlib
+
 import pytest
 
 from modfetch.adapters.download import (
@@ -96,6 +98,46 @@ class TestHttpDownloaderLocal:
         assert result.success is False
         assert result.error is not None
         assert result.error_code == "E300"
+
+    async def test_file_scheme_sha1_match(self, downloader, tmp_path, fake_jar):
+        """file:// 带正确 sha1 → 复制成功且校验通过"""
+        task = DownloadTask(
+            url=fake_jar.as_uri(), filename="mod.jar",
+            destination=str(tmp_path / "out"),
+            expected_sha1=hashlib.sha1(fake_jar.read_bytes()).hexdigest(),
+        )
+        result = await downloader.download(task)
+
+        assert result.success is True
+        assert result.bytes_downloaded == fake_jar.stat().st_size
+        assert (tmp_path / "out" / "mod.jar").exists()
+
+    async def test_file_scheme_sha1_mismatch(self, downloader, tmp_path, fake_jar):
+        """file:// 带错误 sha1 → 校验失败（E302），残留文件被清理"""
+        task = DownloadTask(
+            url=fake_jar.as_uri(), filename="mod.jar",
+            destination=str(tmp_path / "out"),
+            expected_sha1="0" * 40,  # 与 fake_jar 内容不符
+        )
+        result = await downloader.download(task)
+
+        assert result.success is False
+        assert result.error_code == "E302"
+        assert not (tmp_path / "out" / "mod.jar").exists()
+
+    async def test_file_scheme_directory_no_sha1(self, downloader, tmp_path):
+        """目录复制不带 sha1 → 成功；目录不应被误删或误校验"""
+        src = tmp_path / "shaderpack"
+        src.mkdir()
+        (src / "shader.frag").write_text("void main(){}")
+        task = DownloadTask(
+            url=src.as_uri(), filename="shaderpack",
+            destination=str(tmp_path / "out"),
+        )
+        result = await downloader.download(task)
+
+        assert result.success is True
+        assert (tmp_path / "out" / "shaderpack" / "shader.frag").exists()
 
     async def test_path_traversal_rejected(self, downloader, tmp_path, fake_jar):
         task = DownloadTask(

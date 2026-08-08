@@ -179,11 +179,20 @@ class ExecuteBuild:
                     continue
 
                 # -- 2. 物化 target 工作区 --
-                errors.extend(
-                    await self._materialize_target(
-                        plan, target, layout, options.link_mode
-                    )
+                materialize_errors = await self._materialize_target(
+                    plan, target, layout, options.link_mode
                 )
+                errors.extend(materialize_errors)
+
+                # 物化失败（硬链接/复制失败）时跳过打包：工作区缺制品，
+                # 强行打包只会产出缺少部分模组的残缺可分发产物
+                # （比报错更隐蔽）。错误已记入 errors，继续处理下一 target。
+                if materialize_errors:
+                    logger.warning(
+                        f"[执行] target {target.dir_name} 物化失败 "
+                        f"({len(materialize_errors)} 项)，跳过打包"
+                    )
+                    continue
 
                 # -- 3. 打包 --
                 for spec in plan.outputs_for(target):

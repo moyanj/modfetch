@@ -279,22 +279,51 @@ class HttpDownloader:
         """file:// 协议本地复制
 
         本地文件无需走 HTTP，直接复制（支持文件与目录）。
+        复制完成后按 task.expected_sha1 校验（与 HTTP 路径一致），
+        防止本地源文件被篡改/损坏却仍被当作完整制品缓存。
         失败以 DownloadResult 返回，不抛异常。
         """
         try:
             # task.url[7:] 去掉 "file://" 前缀得到本地路径
             size = await self._copier.copy(task.url[7:], file_path)
-            logger.success(f"[完成] 本地文件复制完成: {task.filename}")
-            return DownloadResult(
-                success=True, filename=task.filename,
-                path=str(file_path), bytes_downloaded=size,
-            )
         except DownloadError as e:
             logger.error(f"[错误] 复制文件失败: {e}")
             return DownloadResult(
                 success=False, filename=task.filename,
                 error=str(e), error_code=e.code,
             )
+
+        # 目录复制（copytree）场景：SHA1 只对单一文件内容定义，
+        # 无法对目录计算，且预期哈希仅出现在单文件制品上——跳过校验。
+        if file_path.is_dir():
+            logger.success(f"[完成] 本地目录复制完成: {task.filename}")
+            return DownloadResult(
+                success=True, filename=task.filename,
+                path=str(file_path), bytes_downloaded=size,
+            )
+
+        # 单文件：校验 SHA1（无预期值视为通过），不匹配视为失败
+        if not await self._store.verify(file_path, self._hashes(task)):
+            # 清理残留文件，避免损坏制品被后续构建复用
+            file_path.unlink(missing_ok=True)
+            logger.error(f"[错误] 本地复制 SHA1 校验失败: {task.filename}")
+            error = DownloadChecksumError(
+                f"SHA1 校验失败: {task.filename}",
+                context={
+                    "file": task.filename,
+                    "expected": task.expected_sha1 or "",
+                },
+            )
+            return DownloadResult(
+                success=False, filename=task.filename,
+                error=str(error), error_code=error.code,
+            )
+
+        logger.success(f"[完成] 本地文件复制完成: {task.filename}")
+        return DownloadResult(
+            success=True, filename=task.filename,
+            path=str(file_path), bytes_downloaded=size,
+        )
 
     @staticmethod
     def _hashes(task: DownloadTask) -> dict:
