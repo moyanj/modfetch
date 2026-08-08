@@ -3,9 +3,9 @@
 验证缓存装饰器的核心语义：
 - 相同 key 重复查询只触发一次底层调用（project/version/loader）
 - negative 结果（None）同样缓存，避免反复请求缺失项
+- 缓存键区分 identifier / loader / specific_version
 - single-flight：并发同 key 请求合并为一次底层调用
-- search 透传不缓存
-- close/clear 生命周期行为
+- search 透传不缓存；close/clear 生命周期行为
 """
 
 import asyncio
@@ -100,26 +100,74 @@ def cached(counting: CountingCatalog) -> CachingCatalog:
     return CachingCatalog(counting)
 
 
-class TestProjectCache:
-    async def test_repeated_query_single_call(
-        self, cached: CachingCatalog, counting: CountingCatalog
-    ):
-        """相同 identifier 重复查询 → 仅一次底层调用"""
-        counting.project_result = counting._make_project("AAAA0001")
-        await cached.get_project("AAAA0001")
-        await cached.get_project("AAAA0001")
-        await cached.get_project("AAAA0001")
-        assert counting.project_calls == 1
+def _query(cached: CachingCatalog, counting: CountingCatalog, kind: str):
+    """按类别配置命中返回值，返回 (查询函数, 底层调用计数函数)"""
+    if kind == "project":
+        counting.project_result = counting._make_project("P")
+        return (
+            lambda: cached.get_project("P"),
+            lambda: counting.project_calls,
+        )
+    if kind == "version":
+        counting.version_result = (
+            counting._make_version("v1"),
+            {"filename": "a.jar"},
+        )
+        return (
+            lambda: cached.get_version("P", "1.21.1", "fabric"),
+            lambda: counting.version_calls,
+        )
+    counting.loader_result = "0.16.5"
+    return (
+        lambda: cached.get_loader_version("fabric", "1.21.1"),
+        lambda: counting.loader_calls,
+    )
 
-    async def test_negative_result_cached(
-        self, cached: CachingCatalog, counting: CountingCatalog
-    ):
-        """项目不存在（None）也缓存，避免反复请求缺失项"""
+
+def _negative_query(cached: CachingCatalog, counting: CountingCatalog, kind: str):
+    """按类别配置 negative 结果（未命中），返回 (查询函数, 底层调用计数函数)"""
+    if kind == "project":
         counting.project_result = None
-        assert await cached.get_project("GHOST") is None
-        assert await cached.get_project("GHOST") is None
-        assert counting.project_calls == 1
+        return (
+            lambda: cached.get_project("GHOST"),
+            lambda: counting.project_calls,
+        )
+    if kind == "version":
+        counting.version_result = (None, None)
+        return (
+            lambda: cached.get_version("GHOST", "1.21.1", "fabric"),
+            lambda: counting.version_calls,
+        )
+    counting.loader_result = None
+    return (
+        lambda: cached.get_loader_version("forge", "1.21.1"),
+        lambda: counting.loader_calls,
+    )
 
+
+class TestCacheSemantics:
+    @pytest.mark.parametrize("kind", ["project", "version", "loader"])
+    async def test_repeated_query_single_call(
+        self, cached: CachingCatalog, counting: CountingCatalog, kind: str
+    ):
+        """相同 key 重复查询 → 仅一次底层调用"""
+        query, calls = _query(cached, counting, kind)
+        for _ in range(3):
+            await query()
+        assert calls() == 1
+
+    @pytest.mark.parametrize("kind", ["project", "version", "loader"])
+    async def test_negative_result_cached(
+        self, cached: CachingCatalog, counting: CountingCatalog, kind: str
+    ):
+        """未命中结果（None）也缓存，避免反复请求缺失项"""
+        query, calls = _negative_query(cached, counting, kind)
+        await query()
+        await query()
+        assert calls() == 1
+
+
+class TestCacheKey:
     async def test_different_identifier_uncached(
         self, cached: CachingCatalog, counting: CountingCatalog
     ):
@@ -129,55 +177,18 @@ class TestProjectCache:
         await cached.get_project("BBB")
         assert counting.project_calls == 2
 
-
-class TestVersionCache:
-    async def test_repeated_query_single_call(
-        self, cached: CachingCatalog, counting: CountingCatalog
-    ):
-        """相同 (project, mc, loader) 重复查询 → 仅一次底层调用"""
-        counting.version_result = (counting._make_version("v1"), {"filename": "a.jar"})
-        for _ in range(3):
-            await cached.get_version("AAAA0001", "1.21.1", "fabric")
-        assert counting.version_calls == 1
-
-    async def test_key_includes_loader_and_specific_version(
+    async def test_version_key_includes_loader_and_specific_version(
         self, cached: CachingCatalog, counting: CountingCatalog
     ):
         """缓存键区分 loader 与 specific_version，不同组合各自查询"""
-        counting.version_result = (counting._make_version("v1"), {"filename": "a.jar"})
+        counting.version_result = (
+            counting._make_version("v1"),
+            {"filename": "a.jar"},
+        )
         await cached.get_version("P", "1.21.1", "fabric")
         await cached.get_version("P", "1.21.1", "forge")
         await cached.get_version("P", "1.21.1", "fabric", "1.0.0")
         assert counting.version_calls == 3
-
-    async def test_negative_result_cached(
-        self, cached: CachingCatalog, counting: CountingCatalog
-    ):
-        """无匹配版本（None, None）也缓存"""
-        counting.version_result = (None, None)
-        assert await cached.get_version("P", "1.21.1", "fabric") == (None, None)
-        assert await cached.get_version("P", "1.21.1", "fabric") == (None, None)
-        assert counting.version_calls == 1
-
-
-class TestLoaderVersionCache:
-    async def test_repeated_query_single_call(
-        self, cached: CachingCatalog, counting: CountingCatalog
-    ):
-        """相同 (loader, mc) 重复查询 → 仅一次底层调用"""
-        counting.loader_result = "0.16.5"
-        await cached.get_loader_version("fabric", "1.21.1")
-        await cached.get_loader_version("fabric", "1.21.1")
-        assert counting.loader_calls == 1
-
-    async def test_negative_result_cached(
-        self, cached: CachingCatalog, counting: CountingCatalog
-    ):
-        """loader 版本 None 也缓存（打包时不重复请求）"""
-        counting.loader_result = None
-        assert await cached.get_loader_version("forge", "1.21.1") is None
-        assert await cached.get_loader_version("forge", "1.21.1") is None
-        assert counting.loader_calls == 1
 
 
 class TestSingleFlight:

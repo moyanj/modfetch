@@ -22,35 +22,16 @@ def _validate(mc: dict, features: list[str] | None = None) -> None:
 
 
 class TestShaderLoaderValidation:
-    def test_shaderpack_with_iris_passes(self):
-        """shaderpacks + mods 含 iris → 通过"""
+    @pytest.mark.parametrize(
+        "loader", ["iris", "oculus", "optifine"]
+    )
+    def test_shaderpack_with_loader_passes(self, loader: str):
+        """shaderpacks + mods 含光影加载器（oculus ≡ iris 的 Forge 移植）→ 通过"""
         _validate(
             {
                 "version": ["1.21.1"],
                 "mod_loader": "fabric",
-                "mods": ["iris"],
-                "shaderpacks": ["complementary-reimagined"],
-            }
-        )
-
-    def test_shaderpack_with_oculus_passes(self):
-        """shaderpacks + mods 含 oculus（≡iris 等价）→ 通过"""
-        _validate(
-            {
-                "version": ["1.21.1"],
-                "mod_loader": "forge",
-                "mods": ["oculus"],
-                "shaderpacks": ["complementary-reimagined"],
-            }
-        )
-
-    def test_shaderpack_with_optifine_passes(self):
-        """shaderpacks + mods 含 optifine → 通过"""
-        _validate(
-            {
-                "version": ["1.21.1"],
-                "mod_loader": "forge",
-                "mods": ["optifine"],
+                "mods": [loader],
                 "shaderpacks": ["complementary-reimagined"],
             }
         )

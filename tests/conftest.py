@@ -25,11 +25,6 @@ def _sha1_of(path: Path) -> str:
 
 
 @pytest.fixture
-def fixtures_dir() -> Path:
-    return FIXTURES_DIR
-
-
-@pytest.fixture
 def fake_jar(tmp_path: Path) -> Path:
     """生成一个带固定内容的伪 JAR 文件"""
     jar = tmp_path / "fake-mod.jar"

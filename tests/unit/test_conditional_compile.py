@@ -1,15 +1,14 @@
 """条件编译（feature/only_version）在计划生成层面的组合测试
 
 锁定契约: mods / resourcepacks / shaderpacks / extra_urls 四类条目
-在 PlanBuild 生成计划时统一经 _should_include 过滤:
-    - only_version: 版本命中才包含
-    - feature: 声明的功能标签全部启用才包含（启用条件语义）
-    - 组合条件为 AND——任一不满足即排除
-    - 字符串条目无条件, 始终包含
+在 PlanBuild 生成计划时统一经 should_include 过滤:
+    - only_version: 版本命中才包含（列表命中其一即可）
+    - feature: 声明的功能标签全部启用才包含（AND）
+    - 两类条件组合亦为 AND；字符串条目无条件, 始终包含
 
-背景: should_include 曾对对象条目过滤完全失效（dict 分支不命中），
+背景: should_include 曾对对象条目过滤完全失效（isinstance 分支不命中），
 导致带 feature 的条目被无条件下构建。本套用例在完整计划链路验证
-条件编译真实生效，防止回归。
+条件编译真实生效，防止回归。谓词本身的真值表见 test_version_matcher.py。
 """
 
 import pytest
@@ -18,335 +17,189 @@ from modfetch.application.plan_build import PlanBuild
 from modfetch.domain.config_models import ModFetchConfig
 
 
-def _project_names(plan) -> set:
-    """收集计划中全部制品的项目名（slug）"""
+async def _plan_names(
+    stub_catalog, make_config_dict, mc: dict, active=None, **config_kw
+) -> set:
+    """构造配置并生成计划，返回制品项目名集合
+
+    active: 传给 execute 的 features（None 时回落 config.features）；
+    config_kw: 其余顶层配置键（如 features=["x"] 设置配置默认值）。
+    """
+    config = ModFetchConfig.from_dict(
+        make_config_dict(minecraft=mc, **config_kw)
+    )
+    plan, _ = await PlanBuild(catalog=stub_catalog).execute(
+        config, features=active
+    )
     return {a.project_name for a in plan.artifacts}
 
 
-class TestFeatureFiltering:
-    async def test_feature_enabled_included(self, stub_catalog, make_config_dict):
-        """feature 启用 → 模组进入计划"""
+class TestFeatureGate:
+    async def test_enabled_included_disabled_excluded(
+        self, stub_catalog, make_config_dict
+    ):
+        """feature 启用 → 包含；未启用 → 跳过，无条件条目保留"""
         stub_catalog.add_project("sodium", "sodium")
         stub_catalog.add_project("iris", "iris")
+        mc = {
+            "mods": ["sodium", {"id": "iris", "feature": "graphics"}],
+        }
 
-        config = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": [
-                        "sodium",
-                        {"id": "iris", "feature": "graphics"},
-                    ],
-                }
-            )
-        )
+        assert await _plan_names(
+            stub_catalog, make_config_dict, mc, active=["graphics"]
+        ) == {"sodium", "iris"}
+        assert await _plan_names(
+            stub_catalog, make_config_dict, mc, active=[]
+        ) == {"sodium"}
 
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(
-            config, features=["graphics"]
-        )
-        assert _project_names(plan) == {"sodium", "iris"}
-
-    async def test_feature_not_enabled_excluded(self, stub_catalog, make_config_dict):
-        """feature 未启用 → 条件模组被跳过, 无条件模组保留"""
+    async def test_multi_feature_all_required(
+        self, stub_catalog, make_config_dict
+    ):
+        """多 feature 全部启用才包含（AND 语义）"""
         stub_catalog.add_project("sodium", "sodium")
         stub_catalog.add_project("iris", "iris")
+        mc = {
+            "mods": [
+                "sodium",
+                {"id": "iris", "feature": ["graphics", "shaders"]},
+            ],
+        }
 
-        config = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": [
-                        "sodium",
-                        {"id": "iris", "feature": "graphics"},
-                    ],
-                }
-            )
-        )
-
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(config, features=[])
-        assert _project_names(plan) == {"sodium"}
-
-    async def test_feature_multi_all_required(self, stub_catalog, make_config_dict):
-        """多 feature 全部启用才包含（AND）"""
-        stub_catalog.add_project("sodium", "sodium")
-        stub_catalog.add_project("iris", "iris")
-
-        config = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": [
-                        "sodium",
-                        {"id": "iris", "feature": ["graphics", "shaders"]},
-                    ],
-                }
-            )
-        )
-
-        # 只启用 graphics → iris 不满足全部 → 排除
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(
-            config, features=["graphics"]
-        )
-        assert _project_names(plan) == {"sodium"}
-
-        # 两个都启用 → 包含
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(
-            config, features=["graphics", "shaders"]
-        )
-        assert _project_names(plan) == {"sodium", "iris"}
+        assert await _plan_names(
+            stub_catalog, make_config_dict, mc, active=["graphics"]
+        ) == {"sodium"}
+        assert await _plan_names(
+            stub_catalog,
+            make_config_dict,
+            mc,
+            active=["graphics", "shaders"],
+        ) == {"sodium", "iris"}
 
 
-class TestOnlyVersionFiltering:
-    async def test_only_version_match_included(self, stub_catalog, make_config_dict):
-        """only_version 命中 → 包含"""
+class TestOnlyVersionGate:
+    async def test_match_mismatch_and_list(
+        self, stub_catalog, make_config_dict
+    ):
+        """版本命中（含列表命中其一）→ 包含；不命中 → 排除"""
         stub_catalog.add_project("sodium", "sodium")
         stub_catalog.add_project("extra-mod", "extra-mod")
 
-        config = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": [
-                        "sodium",
-                        {"id": "extra-mod", "only_version": "1.21.1"},
-                    ],
-                }
-            )
-        )
-
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(config)
-        assert _project_names(plan) == {"sodium", "extra-mod"}
-
-    async def test_only_version_mismatch_excluded(self, stub_catalog, make_config_dict):
-        """only_version 不命中 → 排除"""
-        stub_catalog.add_project("sodium", "sodium")
-        stub_catalog.add_project("extra-mod", "extra-mod")
-
-        config = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": [
-                        "sodium",
-                        {"id": "extra-mod", "only_version": "1.20.4"},
-                    ],
-                }
-            )
-        )
-
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(config)
-        assert _project_names(plan) == {"sodium"}
-
-    async def test_only_version_multi_list(self, stub_catalog, make_config_dict):
-        """only_version 支持列表, 命中其一即包含"""
-        stub_catalog.add_project("sodium", "sodium")
-        stub_catalog.add_project("extra-mod", "extra-mod")
-
-        config = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": [
-                        "sodium",
-                        {"id": "extra-mod", "only_version": ["1.20.4", "1.21.1"]},
-                    ],
-                }
-            )
-        )
-
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(config)
-        assert _project_names(plan) == {"sodium", "extra-mod"}
+        for only_version, expected in [
+            ("1.21.1", {"sodium", "extra-mod"}),          # 命中
+            ("1.20.4", {"sodium"}),                        # 不命中
+            (["1.20.4", "1.21.1"], {"sodium", "extra-mod"}),  # 列表命中其一
+        ]:
+            mc = {
+                "mods": [
+                    "sodium",
+                    {"id": "extra-mod", "only_version": only_version},
+                ],
+            }
+            assert await _plan_names(
+                stub_catalog, make_config_dict, mc
+            ) == expected
 
 
 class TestCombinedConditions:
-    async def test_feature_and_only_version_both_required(
+    async def test_feature_and_only_version_are_and(
         self, stub_catalog, make_config_dict
     ):
-        """feature + only_version 组合为 AND: 任一不满足即排除"""
+        """feature + only_version 任一不满足即排除"""
         stub_catalog.add_project("sodium", "sodium")
         stub_catalog.add_project("iris", "iris")
 
-        config = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": [
-                        "sodium",
-                        {
-                            "id": "iris",
-                            "feature": "graphics",
-                            "only_version": "1.21.1",
-                        },
-                    ],
-                }
-            )
-        )
+        def mc(only_version: str) -> dict:
+            return {
+                "mods": [
+                    "sodium",
+                    {
+                        "id": "iris",
+                        "feature": "graphics",
+                        "only_version": only_version,
+                    },
+                ],
+            }
 
         # feature 未启用 → 排除
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(config, features=[])
-        assert _project_names(plan) == {"sodium"}
+        assert await _plan_names(
+            stub_catalog, make_config_dict, mc("1.21.1"), active=[]
+        ) == {"sodium"}
+        # feature 启用 + 版本命中 → 包含
+        assert await _plan_names(
+            stub_catalog,
+            make_config_dict,
+            mc("1.21.1"),
+            active=["graphics"],
+        ) == {"sodium", "iris"}
+        # feature 启用但版本不命中 → 排除
+        assert await _plan_names(
+            stub_catalog,
+            make_config_dict,
+            mc("1.20.4"),
+            active=["graphics"],
+        ) == {"sodium"}
 
-        # feature 启用 + only_version 命中 → 包含
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(
-            config, features=["graphics"]
-        )
-        assert _project_names(plan) == {"sodium", "iris"}
-
-        # feature 启用但 only_version 不命中 → 排除
-        config2 = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": [
-                        "sodium",
-                        {
-                            "id": "iris",
-                            "feature": "graphics",
-                            "only_version": "1.20.4",
-                        },
-                    ],
-                }
-            )
-        )
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(
-            config2, features=["graphics"]
-        )
-        assert _project_names(plan) == {"sodium"}
-
-    async def test_string_entries_always_included(self, stub_catalog, make_config_dict):
-        """纯字符串条目无条件 → 始终包含"""
+    async def test_unconditional_entries_always_included(
+        self, stub_catalog, make_config_dict
+    ):
+        """纯字符串条目与无条件对象条目 → 始终包含"""
         stub_catalog.add_project("sodium", "sodium")
         stub_catalog.add_project("modmenu", "modmenu")
+        mc = {"mods": ["sodium", {"id": "modmenu"}]}
 
-        config = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": ["sodium", "modmenu"],
-                }
-            )
-        )
+        assert await _plan_names(
+            stub_catalog, make_config_dict, mc, active=[]
+        ) == {"sodium", "modmenu"}
 
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(config, features=[])
-        assert _project_names(plan) == {"sodium", "modmenu"}
-
-
-class TestConditionalPackCategories:
-    """资源包/光影包/extra_url 三类条目的条件编译"""
-
-    async def test_resourcepack_feature_filtered(
-        self, stub_catalog, make_config_dict
-    ):
-        """资源包 feature 未启用 → 排除"""
-        stub_catalog.add_project("sodium", "sodium")
-        stub_catalog.add_project("faithful", "faithful")
-
-        config = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": ["sodium"],
-                    "resourcepacks": [
-                        {"id": "faithful", "feature": "faithful-rp"}
-                    ],
-                }
-            )
-        )
-
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(config, features=[])
-        assert _project_names(plan) == {"sodium"}
-
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(
-            config, features=["faithful-rp"]
-        )
-        assert _project_names(plan) == {"sodium", "faithful"}
-
-    async def test_shaderpack_only_version_filtered(
-        self, stub_catalog, make_config_dict
-    ):
-        """光影包 only_version 不命中 → 排除"""
-        stub_catalog.add_project("sodium", "sodium")
-        stub_catalog.add_project("iris", "iris")
-        stub_catalog.add_project("complementary", "complementary")
-
-        config = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": ["sodium", "iris"],
-                    "shaderpacks": [
-                        {
-                            "id": "complementary",
-                            "only_version": "1.20.4",
-                        }
-                    ],
-                }
-            )
-        )
-
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(config)
-        assert _project_names(plan) == {"sodium", "iris"}
-
-    async def test_extra_url_feature_filtered(self, stub_catalog, make_config_dict):
-        """extra_url feature 未启用 → 排除"""
-        config = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": ["sodium"],
-                    "extra_urls": [
-                        {
-                            "url": "https://example.com/custom.jar",
-                            "feature": "extra",
-                        }
-                    ],
-                }
-            )
-        )
-        stub_catalog.add_project("sodium", "sodium")
-
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(config, features=[])
-        assert _project_names(plan) == {"sodium"}
-
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(
-            config, features=["extra"]
-        )
-        assert _project_names(plan) == {"sodium", "custom.jar"}
-
-
-class TestFeaturesFallback:
-    async def test_execute_falls_back_to_config_features(
+    async def test_features_fallback_to_config(
         self, stub_catalog, make_config_dict
     ):
         """execute 未传 features → 回落 config.features"""
         stub_catalog.add_project("sodium", "sodium")
         stub_catalog.add_project("iris", "iris")
+        mc = {"mods": ["sodium", {"id": "iris", "feature": "graphics"}]}
 
-        config = ModFetchConfig.from_dict(
-            make_config_dict(
-                minecraft={
-                    "version": ["1.21.1"],
-                    "mod_loader": "fabric",
-                    "mods": [
-                        "sodium",
-                        {"id": "iris", "feature": "graphics"},
-                    ],
-                },
-                features=["graphics"],
-            )
-        )
+        # 不传 active，config.features 生效
+        assert await _plan_names(
+            stub_catalog, make_config_dict, mc, features=["graphics"]
+        ) == {"sodium", "iris"}
 
-        plan, _ = await PlanBuild(catalog=stub_catalog).execute(config)
-        assert _project_names(plan) == {"sodium", "iris"}
+
+class TestAllCategories:
+    """条件编译对资源包/光影包/extra_url 三类条目一致生效"""
+
+    @pytest.mark.parametrize(
+        "key,entry,expected_name",
+        [
+            ("resourcepacks", {"id": "faithful", "feature": "f"}, "faithful"),
+            (
+                "shaderpacks",
+                {"id": "complementary", "feature": "f"},
+                "complementary",
+            ),
+            (
+                "extra_urls",
+                {"url": "https://example.com/custom.jar", "feature": "f"},
+                "custom.jar",
+            ),
+        ],
+    )
+    async def test_feature_gate_per_category(
+        self,
+        stub_catalog,
+        make_config_dict,
+        key: str,
+        entry: dict,
+        expected_name: str,
+    ):
+        stub_catalog.add_project("sodium", "sodium")
+        if "id" in entry:
+            stub_catalog.add_project(entry["id"], entry["id"])
+        mc = {"mods": ["sodium"], key: [entry]}
+
+        assert await _plan_names(
+            stub_catalog, make_config_dict, mc, active=[]
+        ) == {"sodium"}
+        assert await _plan_names(
+            stub_catalog, make_config_dict, mc, active=["f"]
+        ) == {"sodium", expected_name}

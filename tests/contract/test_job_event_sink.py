@@ -169,3 +169,59 @@ class TestJobStateIntegration:
         assert job.status == "completed"
         assert len(job.results) == 1
         assert job.results[0].loader == "fabric"
+
+
+class TestJobStateFolding:
+    """JobState 对翻译后事件的直接折叠契约"""
+
+    def _make_job(self) -> JobState:
+        return JobState(
+            id="job-1", status="pending", phase="idle",
+            stats=JobStats(), config_dict={},
+        )
+
+    async def test_phase_change(self):
+        job = self._make_job()
+        await job.broadcast({"event": "phase_change", "data": {"phase": "download"}})
+        assert job.phase == "download"
+
+    async def test_stats_update(self):
+        job = self._make_job()
+        await job.broadcast(
+            {
+                "event": "stats_update",
+                "data": {
+                    "total": 10, "completed": 3, "failed": 1,
+                    "bytes_downloaded": 1024,
+                },
+            }
+        )
+        assert job.stats.total_mods == 10
+        assert job.stats.downloaded == 3
+        assert job.stats.failed == 1
+        assert job.stats.bytes_downloaded == 1024
+
+    async def test_resolve_complete_increments(self):
+        job = self._make_job()
+        await job.broadcast({"event": "resolve_complete", "data": {}})
+        await job.broadcast({"event": "resolve_complete", "data": {}})
+        assert job.stats.resolved == 2
+
+    async def test_job_failed_dedup_error(self):
+        """相同错误不重复写入 errors"""
+        job = self._make_job()
+        error_event = {
+            "event": "job_failed",
+            "data": {"error": {"code": "E300", "message": "boom"}},
+        }
+        await job.broadcast(error_event)
+        await job.broadcast(error_event)
+        assert job.status == "failed"
+        assert len(job.errors) == 1
+
+    async def test_event_history_capped(self):
+        """事件历史上限 512 条"""
+        job = self._make_job()
+        for _ in range(600):
+            await job.broadcast({"event": "phase_change", "data": {"phase": "x"}})
+        assert len(job.event_history) == 512

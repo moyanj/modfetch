@@ -9,7 +9,6 @@ import yaml
 from modfetch.adapters.config.toml_parser import load as load_toml
 from modfetch.adapters.config.toml_parser import loads as toml_loads
 from modfetch.domain import (
-    FileType,
     ModEntry,
     ModFetchConfig,
     ModLoader,
@@ -198,32 +197,17 @@ class TestRoundTrip:
         # verify_ssl 必须保留（round-trip 不丢配置）
         assert restored.verify_ssl == config.verify_ssl
 
-    def test_parse_verify_ssl_false(self):
-        """verify_ssl=false 应被 from_dict 读取（不回退默认 True）"""
-        config = ModFetchConfig.from_dict(
+    def test_parse_verify_ssl(self):
+        """verify_ssl 显式 false 被读取；缺省回落默认 True"""
+        explicit = ModFetchConfig.from_dict(
             {
                 "minecraft": {"version": ["1.21.1"], "mods": ["sodium"]},
                 "verify_ssl": False,
             }
         )
-        assert config.verify_ssl is False
+        assert explicit.verify_ssl is False
 
-    def test_verify_ssl_default_true(self):
-        """未配置 verify_ssl 时默认 True"""
-        config = ModFetchConfig.from_dict(
+        default = ModFetchConfig.from_dict(
             {"minecraft": {"version": ["1.21.1"], "mods": ["sodium"]}}
         )
-        assert config.verify_ssl is True
-
-    def test_extra_url_filetype_file(self):
-        """extra_urls 中 FileType 默认值"""
-        config = ModFetchConfig.from_dict(
-            {
-                "minecraft": {
-                    "version": ["1.21.1"],
-                    "mods": ["sodium"],
-                    "extra_urls": [{"url": "https://example.com/a.zip"}],
-                }
-            }
-        )
-        assert config.minecraft.extra_urls[0].type == FileType.FILE
+        assert default.verify_ssl is True

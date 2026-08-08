@@ -1,4 +1,9 @@
-"""extra_urls 解析与目标目录基线测试"""
+"""extra_urls 解析基线测试
+
+目标目录语义（file→根目录、shaderpack→shaderpacks/ 等）由
+integration/test_build_service.py 的 extra_url 端到端用例覆盖，
+此处仅锁定配置解析层契约。
+"""
 
 from pathlib import Path
 
@@ -19,7 +24,7 @@ class TestExtraUrlParse:
         assert len(urls) == 3
 
         first = urls[0]
-        assert first.type == FileType.FILE
+        assert first.type == FileType.FILE  # type 缺省默认 FILE
         assert first.sha1 == "deadbeef"
         assert first.filename == "datapack.zip"  # 自动提取
 
@@ -59,34 +64,7 @@ class TestExtraUrlParse:
                 }
             )
 
-
-class TestExtraUrlDestination:
-    """目标目录约定（orchestrator._process_extra_urls 的参考语义）"""
-
-    @pytest.mark.parametrize(
-        "file_type,expected_category",
-        [
-            (FileType.FILE, "file"),
-            # 当前行为基线: MOD 类型映射为 "mod"（单数，orchestrator 的 replace 逻辑所致）
-            (FileType.MOD, "mod"),
-            (FileType.RESOURCEPACK, "resourcepacks"),
-            (FileType.SHADERPACK, "shaderpacks"),
-        ],
-    )
-    def test_category_mapping(self, file_type, expected_category):
-        """file 类型放版本根目录，其他类型进入对应子目录（pack→packs 复数化）"""
-        if file_type == FileType.FILE:
-            category = "file"
-        else:
-            category = file_type.value.replace("pack", "packs")
-        assert category == expected_category
-
-    def test_url_basename_strips_trailing_slash(self):
-        """从 URL 提取文件名时去掉尾部斜杠"""
-        url = "https://example.com/dir/"
-        basename = url.rstrip("/").split("/")[-1]
-        assert basename == "dir"
-
-    def test_filename_fallback_to_url(self):
+    def test_filename_fallback_to_url_basename(self):
+        """filename 缺省时取 URL 末段"""
         entry = ExtraUrl(url="https://example.com/a/b/config.toml")
         assert entry.filename == "config.toml"

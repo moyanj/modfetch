@@ -12,4 +12,7 @@ wheels/
 uv.lock
 downloads/
 
+# Coverage reports
+.coverage
+
 __main__*
