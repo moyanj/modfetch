@@ -1,0 +1,41 @@
+# =====================================================================
+# ModFetch 配置继承 — 子配置（继承 + 覆盖）
+#
+# 用途：通过 [from] 继承 base_config.toml 的公共设置，再叠加本文件
+# 的差异化内容。适合多整合包共享基础模组/输出配置的场景。
+#     uv run modfetch examples/mods_inherited.toml
+# =====================================================================
+
+# 继承来源（支持 file:// 本地路径与 http(s):// 远程 URL）
+# format 可省略（默认 toml），也支持 json/yaml/mrpack
+[from]
+url = "file://./base_config.toml"
+format = "toml"
+
+[metadata]
+# 覆盖父配置的 name/version/description（其余字段沿用父值）
+name = "Inherited Custom Pack"
+version = "1.1.0"
+description = "继承 base_config.toml 后自定义的整合包"
+
+[minecraft]
+# version/mod_loader 若省略则沿用父配置；这里显式追加第二个版本
+# （list 字段会与父配置拼接去重）
+version = ["1.21.1", "1.20.4"]
+
+mods = [
+    # 父配置已有 sodium/modmenu，这里追加 fabric-api（拼接去重）
+    "fabric-api",
+    "lithium",
+]
+
+[output]
+# format 沿用父配置（mrpack），这里追加 zip
+format = ["mrpack", "zip"]
+
+[plugins]
+# 沿用父配置的 progress，追加 notify
+enabled = ["progress", "notify"]
+
+[plugins.config.notify]
+webhook_url = "https://example.com/webhook"

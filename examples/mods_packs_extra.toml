@@ -1,0 +1,68 @@
+# =====================================================================
+# ModFetch 资源包 + 光影包 + extra_urls 示例
+#
+# 用途：展示模组之外的三种内容来源：
+#   1. resourcepacks  — 资源包（纹理/音效等，不区分加载器）
+#   2. shaderpacks    — 光影包（需 mods 含 iris/oculus/optifine）
+#   3. extra_urls     — 非 Modrinth 来源的自定义文件（直接注入 overrides/）
+#
+# 注：extra_urls 无法用多行内联表（{ } 必须单行），故用
+# [[minecraft.extra_urls]] 数组表语法逐条定义，更可读。
+# 本示例所有条目均为真实可下载来源（本地文件 / 真实 CDN），可直接构建。
+# =====================================================================
+
+[metadata]
+name = "Packs And Extras"
+version = "1.4.2"
+description = "演示资源包、光影包与额外 URL 注入"
+
+[minecraft]
+version = ["1.21.1"]
+mod_loader = "fabric"
+
+mods = [
+    "sodium",
+    # 光影加载器（必填之一）：fabric 用 iris；forge/neoforge 用 oculus（等价）
+    # 配置了 shaderpacks 而缺少它时，本地校验会以 E102 拒绝构建
+    "iris",
+]
+
+# —— 资源包（简洁或 dict 写法均可）——
+resourcepacks = [
+    "faithful-64x",
+    { id = "fast-better-grass", feature = "performance" },
+    { id = "new-glowing-ores", only_version = "1.21.1" },
+]
+
+# —— 光影包（解析时以配置的光影加载器 iris 过滤版本）——
+shaderpacks = [
+    "complementary-reimagined",
+]
+
+# —— 额外 URL（非 Modrinth 来源，注入 overrides/ 对应子目录）——
+[[minecraft.extra_urls]]
+# type = "file" → 整合包根目录 (overrides/ 根)
+# 本地来源用 file://；相对路径基于当前工作目录
+url = "file://./examples/local_assets/note.json"
+type = "file"
+filename = "my_pack_note.json"
+
+[[minecraft.extra_urls]]
+# type = "mod" → overrides/mods/（此处注入一个文本占位，演示类型路由；
+# 真实场景应为自定义 mod/资源文件）
+url = "file://./examples/local_assets/example-shaderpack.txt"
+type = "mod"
+filename = "custom-note.txt"
+
+[[minecraft.extra_urls]]
+# type = "shaderpack" → overrides/shaderpacks/，带 sha1 校验演示
+# 使用真实的 Modrinth CDN 文件（sodium-fabric 1.21.1），sha1 已确认真实值
+# —— 替换为自己的文件 URL + 对应 sha1 即可
+url = "https://cdn.modrinth.com/data/AANobbMI/versions/QV48eyCs/sodium-fabric-0.8.13-beta.2%2Bmc1.21.1.jar"
+type = "shaderpack"
+filename = "vanilla-plus-shader.zip"
+sha1 = "d01f2112698d08b052d042c68c1206af790e660a"
+
+[output]
+download_dir = "./downloads"
+format = ["mrpack"]

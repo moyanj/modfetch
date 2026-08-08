@@ -1,0 +1,32 @@
+# =====================================================================
+# ModFetch 最小可用配置示例
+#
+# 用途：演示配置文件的最简骨架——只需 metadata + minecraft + output
+# 三节即可跑通一次完整构建。把本文件复制为 mods.toml 后执行：
+#     uv run modfetch mods.toml
+# =====================================================================
+
+[metadata]
+name = "My Minimal Pack"
+version = "1.0.0"
+description = "展示 modfetch 完整的最小可用配置"
+
+[minecraft]
+# Minecraft 版本（必填，支持多版本同时构建）
+version = ["1.21.1"]
+
+# 模组加载器: fabric | forge | neoforge | quilt（默认 fabric）
+mod_loader = "fabric"
+
+# 模组列表（简洁写法：直接写 Modrinth slug 或项目 ID）
+mods = [
+    "sodium",
+    "modmenu",
+]
+
+[output]
+# 构建根目录（内部固定结构: build/cache + build/{mc}-{loader} + dist/）
+download_dir = "./downloads"
+
+# 输出格式: "mrpack" | "zip"，可多选
+format = ["mrpack"]

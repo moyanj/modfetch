@@ -1,0 +1,26 @@
+# =====================================================================
+# ModFetch 配置继承 — 父配置（base）
+#
+# 用法：被 mods_inherited.toml 通过 [from] 引用。子配置会覆盖父配置
+# 的同名字段，list 字段拼接去重（保持顺序）。
+# =====================================================================
+
+[metadata]
+name = "Base Shared Pack"
+version = "0.9.0"
+description = "被继承的公共基础配置（模组/输出/插件默认值）"
+
+[minecraft]
+version = ["1.21.1"]
+mod_loader = "fabric"
+mods = [
+    "sodium",
+    "modmenu",
+]
+
+[output]
+download_dir = "./downloads"
+format = ["mrpack"]
+
+[plugins]
+enabled = ["progress"]

@@ -1,0 +1,63 @@
+# =====================================================================
+# ModFetch 条件编译示例（only_version + feature）
+#
+# 用途：展示 how 同一份配置按「Minecraft 版本」与「功能标签」精确
+# 控制哪些模组进入构建。执行时用 -f/--feature 启停功能组：
+#     uv run modfetch examples/mods_conditional.toml -f performance -f shaders
+# =====================================================================
+
+# 全局功能标签（根表键，必须放在所有 [table] 之前）
+# = 默认启用的 feature 集合；CLI 的 -f 会覆盖本值
+features = ["performance"]
+
+# 全局构建选项（同样是根表键）
+max_concurrent = 5
+max_retries = 3
+verify_ssl = true
+
+[metadata]
+name = "Conditions Pack"
+version = "2.0.0"
+description = "演示 only_version 与 feature 条件过滤"
+
+[minecraft]
+version = [
+    "1.21.1",
+    "1.20.4",
+]
+mod_loader = "fabric"
+
+mods = [
+    # —— 简洁写法：无条件，全部版本/加载器都构建 ——
+    "sodium",
+    "modmenu",
+
+    # —— only_version：仅指定 MC 版本生效（字符串或数组均可）——
+    { id = "spark", only_version = "1.21.1" },            # 只在 1.21.1
+    { id = "sodium-extra", only_version = ["1.21.1"] },   # 数组写法等价
+
+    # —— feature：启用该功能标签才生效（AND 语义）——
+    { id = "lithium", feature = "performance" },          # -f performance 时生效
+    { id = "entityculling", feature = ["performance"] },
+
+    # —— only_version + feature 组合：需同时满足（AND）——
+    { id = "iris", feature = "shaders" },  # 光影加载器: 全版本生效（真实支持 1.21.1/1.20.4）
+
+    # —— version：固定版本号（默认取该组合下的最新兼容版本）——
+    { slug = "fabric-api", version = "0.116.15+1.21.1", only_version = "1.21.1" },  # 固定版本+限定版本
+]
+
+# 资源包同样支持条件过滤
+resourcepacks = [
+    { id = "faithful-32x", only_version = ["1.21.1", "1.20.4"] },
+    { id = "fast-better-grass", feature = "performance" },
+]
+
+# 光影包：需 mods 含 iris/oculus/optifine 之一（本地校验强制）
+shaderpacks = [
+    { id = "complementary-reimagined", feature = "shaders" },
+]
+
+[output]
+download_dir = "./downloads"
+format = ["mrpack"]

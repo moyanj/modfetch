@@ -1,0 +1,4 @@
+{
+  "note": "这是一个由 modfetch 示例注入的本地文件",
+  "用途": "演示 extra_urls 的 file:// 本地来源"
+}

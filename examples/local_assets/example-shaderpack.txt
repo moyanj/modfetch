@@ -1,0 +1,1 @@
+演示用文本 —— 说明 extra_urls 可注入任意文件类型（此处为 shaderpack 类型占位）
