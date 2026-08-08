@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
+from modfetch import __version__
 from modfetch.adapters.jobs import JobApplicationService
 from modfetch.adapters.modrinth import ModrinthClient
 from modfetch.server.routes import router as api_router
@@ -44,7 +45,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="ModFetch API",
         description="Minecraft 模组下载管理工具 - REST API",
-        version="0.2.0",
+        version=__version__,
     )
 
     # CORS — 允许前端开发服务器访问
