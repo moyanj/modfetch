@@ -32,6 +32,7 @@ license-files = []
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "nuitka>=2.7.12",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
