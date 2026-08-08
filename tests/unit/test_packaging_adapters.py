@@ -60,15 +60,16 @@ def _seed_workspace(workspace: Path, files: dict[str, bytes]) -> None:
 
 class TestMrpackPackager:
     async def test_download_mode(self, tmp_path):
-        """DOWNLOAD 模式: workspace 内容进入 overrides"""
+        """DOWNLOAD 模式: workspace 内容进入 overrides, files 同样填充"""
         _seed_workspace(tmp_path, {"mods/a.jar": b"a"})
         packager = MrpackPackager(metadata={"name": "P", "version": "1.0.0"})
         spec = OutputSpec(
             format="mrpack", target=TARGET,
             output_name="pack", mrpack_mode="download",
         )
+        plan = _plan(artifacts=[_artifact("a.jar"), _artifact("b.jar")])
 
-        artifact = await packager.package(_plan(), spec, tmp_path / TARGET.dir_name, tmp_path / f"{spec.output_name}.mrpack")
+        artifact = await packager.package(plan, spec, tmp_path / TARGET.dir_name, tmp_path / f"{spec.output_name}.mrpack")
 
         assert artifact.format == "mrpack"
         assert artifact.target == TARGET
@@ -77,6 +78,10 @@ class TestMrpackPackager:
             assert "overrides/mods/a.jar" in zf.namelist()
             manifest = json.loads(zf.read("modrinth.index.json"))
             assert manifest["name"] == "P"
+            # DOWNLOAD 模式 files 同样填充 catalog 制品引用
+            assert {f["path"] for f in manifest["files"]} == {
+                "mods/a.jar", "mods/b.jar",
+            }
 
     async def test_reference_mode_files_from_plan(self, tmp_path):
         """REFERENCE 模式: manifest.files 来自 plan 制品而非实例状态"""

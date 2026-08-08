@@ -57,3 +57,4 @@ shaderpacks = ["complementary-reimagined", "vanilla-plus-shader"]
 # 模组下载目录，程序将在此目录下创建 'mods' 文件夹
 download_dir = "./downloads"
 format = ["mrpack", "zip"]
+mrpack_mode = "reference"

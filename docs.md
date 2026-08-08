@@ -213,6 +213,8 @@ extra_urls = [
     - `download`：下载所有模组到整合包内（`overrides/` 目录）
     - `reference`：不下载平台模组，仅在 `modrinth.index.json` 中引用（轻量整合包）
       - 该模式下 `overrides/` 仅包含 `extra_urls` 来源的自定义文件
+    - 两种模式下 `modrinth.index.json` 的 `files` 均会填充平台模组引用清单
+      （`download` 的模组同时物理存在于 `overrides/`）
 
 #### **示例**
 ```toml

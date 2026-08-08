@@ -35,9 +35,13 @@ class MrpackPackager:
     """Mrpack 打包器（实现 PackagerPort）
 
     按 OutputSpec 为单个构建目标生成 .mrpack 整合包，支持两种模式：
-    - download: 下载的制品物理复制到 overrides/，manifest.files 保持空
+    - download: 下载的制品物理复制到 overrides/；manifest.files 同样
+      填充 catalog 制品引用（便于第三方工具识别包内模组清单）
     - reference: 制品仅以引用（path/hashes/env/downloads）写入
       manifest.files，模组文件不落入包内，客户端按引用自行下载
+
+    两种模式下 manifest.files 均填充 catalog 来源的制品；extra_url
+    文件不写入 files，无论哪种模式都物理落入 overrides/。
 
     source_dir 为 target 工作区根（含各品类子目录），产物写入
     output_path（调用方保证父目录存在）。
@@ -98,15 +102,13 @@ class MrpackPackager:
                 plan, target, source_dir
             )
 
-        files = (
-            [
-                artifact.to_mrpack_entry()
-                for artifact in plan.artifacts_for(target)
-                if artifact.origin == "catalog"
-            ]
-            if mode == MrpackMode.REFERENCE
-            else None
-        )
+        # 两种模式下 files 均需填充（catalog 制品写引用；extra_url 不写，
+        # 无论哪种模式都物理落入 overrides）
+        files = [
+            artifact.to_mrpack_entry()
+            for artifact in plan.artifacts_for(target)
+            if artifact.origin == "catalog"
+        ]
 
         # 产物输出目录须存在（dist/ 由调用方确保）
         output_path.parent.mkdir(parents=True, exist_ok=True)

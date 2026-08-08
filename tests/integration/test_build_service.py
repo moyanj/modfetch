@@ -176,6 +176,15 @@ class TestBuildService:
             assert "overrides/custom.json" in zf.namelist()
             content = zf.read("overrides/custom.json")
             assert json.loads(content) == {"custom": True}
+            # DOWNLOAD 模式 manifest.files 同样填充 catalog 制品
+            manifest = json.loads(zf.read("modrinth.index.json"))
+            assert any(
+                f["path"].startswith("mods/") for f in manifest["files"]
+            )
+            # extra_url 不写入 files
+            assert not any(
+                f["path"] == "custom.json" for f in manifest["files"]
+            )
 
     async def test_extra_url_injected_reference_mode(
         self, make_config_dict, tmp_path

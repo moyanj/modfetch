@@ -17,6 +17,13 @@ from typing import Optional
 from modfetch.domain.config_models import ModLoader
 from modfetch.domain.errors import MrpackError
 
+ModLoaderMapping = {
+    ModLoader.FABRIC: "fabric-loader",
+    ModLoader.FORGE: "forge",
+    ModLoader.NEOFORGE: "neoforge",
+    ModLoader.QUILT: "quilt-loader",
+}
+
 
 class MrpackBuilder:
     """Mrpack 构建器
@@ -46,7 +53,8 @@ class MrpackBuilder:
             mc_version: Minecraft 版本
             mod_loader: 模组加载器
             loader_version: 加载器版本
-            files: 直接写入 manifest 的文件列表（REFERENCE 模式）
+            files: 写入 manifest.files 的文件引用列表（download /
+                reference 模式均由调用方填充；缺省时为空列表）
 
         Returns:
             生成的文件路径
@@ -57,7 +65,8 @@ class MrpackBuilder:
                 metadata, mc_version, mod_loader, loader_version
             )
             if files:
-                # REFERENCE 模式：文件仅以引用写入 manifest.files，不物理复制
+                # 文件引用写入 manifest.files；物理文件由调用方决定
+                # 是否落入 overrides（download 模式复制、reference 不复制）
                 manifest["files"] = files
 
             # 全部文件 IO（建目录/复制/压缩/move）移入 worker 线程，
@@ -133,14 +142,14 @@ class MrpackBuilder:
         按 mrpack 规范（formatVersion=1）构造 modrinth.index.json：
         - dependencies.minecraft 必填（MC 版本）
         - {loader}-loader 依赖仅在加载器版本已知（非 unknown）时声明
-        - files 默认空列表，REFERENCE 模式由调用方填充
+        - files 默认为空列表，由调用方按需填充（download / reference
+          两种模式均应填充 catalog 制品引用）
         """
-        mod_loader_id = mod_loader.value.lower()
 
         # 依赖声明：minecraft 必填；加载器版本未解析出时不写入 loader 依赖
         dependencies: dict = {"minecraft": mc_version}
         if loader_version and loader_version != "unknown":
-            dependencies[f"{mod_loader_id}-loader"] = loader_version
+            dependencies[ModLoaderMapping[mod_loader]] = loader_version
 
         return {
             "game": "minecraft",
