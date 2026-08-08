@@ -9,6 +9,25 @@
 
 ### 待定
 
+## [1.0.1] - 2026-08-08
+
+### 🐛 修复
+
+- **file:// 资源未校验 SHA1**：本地文件复制后按 `expected_sha1` 校验，
+  防止篡改/损坏的本地源文件被当作完整制品缓存复用；校验失败清理残留并报 `E302`。
+- **物化失败后仍打包**：硬链接/复制失败时跳过该 target 的打包，
+  不再产出缺少模组的残缺 ZIP/mrpack；工作区缺文件时 `outputs` 为空且 `dist` 无产物。
+- **mrpack DOWNLOAD 模式 `manifest.files` 为空**：download 模式同样填充
+  catalog 制品引用（便于第三方工具识别包内模组清单），`extra_urls` 文件仍只落 `overrides`。
+- **加载器依赖 ID 修正**：forge/neoforge 的 mrpack 依赖 ID 不再错误拼成
+  `forge-loader`/`neoforge-loader`，改用规范值 `forge`/`neoforge`。
+- **Web 健康检查版本号残留**：`/api/health` 的版本号由残留的 `0.2.0`
+  改为引用包级 `__version__`，消除硬编码重复。
+
+### 📦 版本
+
+- 后端 / 前端 / API 元数据统一升级至 `1.0.1`。
+
 ## [1.0.0] - 2026-08-08
 
 ### 🎉 超级重大更新：架构全面重写
@@ -97,18 +116,6 @@
 3. **构建布局**：构建目录已更新为 `build/cache + build/{mc}-{loader} + dist` 三层结构，
    旧版产出目录需手动清理；
 4. **`verify_ssl`**：默认 `True`，如需关闭请在配置中显式设置。
-
-### 安装
-
-```bash
-# 通过 pip / uv
-pip install modfetch==1.0.0
-uv tool install modfetch==1.0.0
-
-# 或从 GitHub Release 下载预编译二进制
-#   Linux:   modfetch-linux-amd64.tar.gz
-#   Windows: modfetch-windows-amd64.zip
-```
 
 ## [0.2.0] - 2026-07-08
 

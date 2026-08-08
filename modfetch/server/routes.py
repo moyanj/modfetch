@@ -12,6 +12,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+from modfetch import __version__
+
 from modfetch.adapters.modrinth import build_modrinth_facets
 from modfetch.application.config_service import ConfigService
 from modfetch.application.validation import validation_issue_to_dict
@@ -23,7 +25,8 @@ from modfetch.adapters.jobs import JobManager
 router = APIRouter(prefix="/api")
 
 # 项目版本
-APP_VERSION = "0.2.0"
+# 项目版本（引用包级版本号，避免重复硬编码）
+APP_VERSION = __version__
 
 
 def _catalog(request: Request) -> CatalogPort:
