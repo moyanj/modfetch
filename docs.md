@@ -305,7 +305,7 @@ enabled = ["progress"]
 modfetch [OPTIONS] CONFIG
 
 选项:
-  -f, --feature TEXT    启用的功能标签（可多次，与配置顶层 features 叠加）
+  -f, --feature TEXT    启用的功能标签（可多次；未传时保留配置顶层 features 默认值）
   --plugin TEXT         加载插件（可多次；.lua 走 Lua loader，其余走 Python loader）
   --plugin-dir TEXT     插件目录路径（递归扫描其中的 .py 与 .lua 文件）
   --list-plugins        列出已加载的插件后返回
@@ -316,7 +316,8 @@ modfetch [OPTIONS] CONFIG
 ```
 
 > 注意：`-f/--feature` 与配置顶层 `features` 共同决定条件编译结果；
-> CLI 传入的 `-f` 会覆盖并作为校验/构建的启用 feature 集合。
+> 显式传入 `-f` 时会覆盖配置顶层 `features` 作为校验/构建的启用集合；
+> 未传 `-f` 时保留配置顶层 `features` 默认值（如 `features = ["performance"]`）。
 
 ---
 

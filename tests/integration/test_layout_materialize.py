@@ -60,6 +60,24 @@ class _NoopSink:
         pass
 
 
+class _FailingDownloader:
+    """下载失败桩：全部任务返回 success=False 且不写文件"""
+
+    def __init__(self, error: str = "网络错误"):
+        self.error = error
+        self.calls: list[DownloadTask] = []
+
+    async def download(self, task: DownloadTask, progress=None) -> DownloadResult:
+        self.calls.append(task)
+        return DownloadResult(
+            success=False, filename=task.filename,
+            error=self.error, error_code="E301",
+        )
+
+    async def close(self):
+        pass
+
+
 def _plan(artifacts, outputs) -> BuildPlan:
     return BuildPlan(
         targets=(TARGET,), artifacts=tuple(artifacts), outputs=tuple(outputs)
@@ -196,3 +214,27 @@ async def test_materialize_failure_recorded(tmp_path, monkeypatch):
     materialize_errors = [e for e in result.errors if e.phase == "materialize"]
     assert materialize_errors, "应记录物化错误"
     assert "硬链接失败" in materialize_errors[0].message
+
+
+async def test_download_failure_skips_materialize(tmp_path):
+    """下载失败 → 物化跳过：仅 E300 下载错误，不重复报 E400"""
+    artifacts = [_artifact("a.jar")]
+    spec = OutputSpec(format="zip", target=TARGET, output_name="pack")
+    plan = _plan(artifacts, [spec])
+    layout = BuildLayout(tmp_path / "dl")
+    downloader = _FailingDownloader("下载失败: 网络错误")
+    packager = _NoopPackager()
+
+    exec_ = ExecuteBuild(downloader, packager)
+    result = await exec_.execute(
+        plan, "job", _NoopSink(), BuildOptions(layout=layout)
+    )
+
+    # 下载失败记为 E300（phase=download），且不产生误导性物化错误
+    download_errors = [e for e in result.errors if e.phase == "download"]
+    materialize_errors = [e for e in result.errors if e.phase == "materialize"]
+    assert len(download_errors) == 1
+    assert download_errors[0].code == "E301"
+    assert materialize_errors == [], "下载失败不应再报物化错误"
+    # 工作区不出现失败制品的残影
+    assert not layout.workspace_for(TARGET, "mods/a.jar").exists()

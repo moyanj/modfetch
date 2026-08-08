@@ -58,6 +58,16 @@ class TestNormalizeSlug:
         with pytest.raises(LayoutError):
             normalize_slug("!!!###")
 
+    def test_unicode_fallback_keeps_cjk(self):
+        """纯中文包名：ASCII 剔除后宽松回退保留，不再抛错"""
+        assert normalize_slug("我的整合包") == "我的整合包"
+        assert normalize_slug("高性能 整合包") == "高性能-整合包"
+
+    def test_unicode_fallback_strips_unsafe(self):
+        """宽松回退也剔除符号/空白，结果可用于文件名"""
+        assert normalize_slug("整合包！") == "整合包"
+        assert normalize_slug("包·名？") == "包名"
+
 
 class TestBuildLayout:
     def test_directories(self, tmp_path):
@@ -93,6 +103,15 @@ class TestBuildLayout:
             layout.workspace_for(TARGET, "../evil.jar")
         with pytest.raises(LayoutError):
             layout.workspace_for(TARGET, "/abs.jar")
+        # 中间穿越（开头合法、中段含 ..）
+        with pytest.raises(LayoutError):
+            layout.workspace_for(TARGET, "mods/../../evil.jar")
+        with pytest.raises(LayoutError):
+            layout.workspace_for(TARGET, "")
+        # 合法相对路径不受影响
+        assert layout.workspace_for(TARGET, "mods/sodium.jar") == (
+            layout.target_build_dir(TARGET) / "mods/sodium.jar"
+        )
 
     def test_output_path(self, tmp_path):
         layout = BuildLayout(tmp_path)

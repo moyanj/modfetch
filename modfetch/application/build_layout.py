@@ -42,15 +42,24 @@ def normalize_slug(name: str) -> str:
     """把 metadata.name 规范化为文件系统安全 slug
 
     规则：小写、连续空白折叠为单个 ``-``、仅保留 ASCII 字母数字
-    ``-``/``_``、去掉首尾 ``-``/``_``；结果为空抛 LayoutError。
+    ``-``/``_``、去掉首尾 ``-``/``_``。
+
+    当 ASCII 白名单剔除后为空（如纯中文包名）时，宽松回退到保留
+    Unicode 字母数字（中文/日文等），仅剔除空白与路径危险字符，
+    避免曾经的可用包名变为构建失败；仍为空（如纯符号）才抛错。
 
     Raises:
         LayoutError: 规范化后为空（不可用于路径）
     """
-    slug = name.strip().lower()
-    slug = re.sub(r"\s+", "-", slug)
+    raw = name.strip().lower()
+    slug = re.sub(r"\s+", "-", raw)
     slug = re.sub(r"[^a-z0-9\-_]", "", slug)
     slug = slug.strip("-_")
+    if not slug:
+        # 宽松回退：保留 Unicode 字母数字（\w），仅去空白与 ASCII 危险字符
+        slug = re.sub(r"\s+", "-", raw)
+        slug = re.sub(r"[^\w\-]", "", slug, flags=re.UNICODE)
+        slug = slug.strip("-_")
     if not slug:
         raise LayoutError(f"包名无法规范化为文件名: {name!r}")
     return slug
@@ -143,10 +152,20 @@ class BuildLayout:
 
         ``destination`` 为相对工作区根的路径（如 ``mods/sodium.jar``），
         由 PlanBuild 生成；本方法做目录穿越防御。
+
+        防御覆盖三种逃逸形态：
+        - 空/绝对路径（``/etc/passwd``、``C:\\x``）
+        - 开头穿越（``../x``）
+        - 中间穿越（``mods/../../x``、``mods\\..\\..\\x``）
         """
-        if not destination or destination.startswith(("/", "\\", "..")):
+        if not destination:
             raise LayoutError(f"非法目标相对路径: {destination!r}")
-        return self.target_build_dir(target) / destination
+        dest = Path(destination)
+        # Path.parts 按平台分隔符切分：含 ".." 分段或绝对路径均拒绝
+        # （Windows 上反斜杠也是分隔符，跨平台一致防御）
+        if dest.is_absolute() or ".." in dest.parts:
+            raise LayoutError(f"非法目标相对路径: {destination!r}")
+        return self.target_build_dir(target) / dest
 
     # -- 产物 -----------------------------------------------------------
 

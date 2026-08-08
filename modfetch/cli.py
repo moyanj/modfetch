@@ -169,8 +169,11 @@ async def run_async(
             # 显式传入 CLI 的功能标签做本地校验（含跨字段条件编译判断），
             # 此时 config.features 尚未被 --feature 覆盖，必须显式传参
 
-            config_service.validate_local(config, features)
-            config.features = features
+            config_service.validate_local(config, features or None)
+            # 仅在显式传入 -f 时覆盖配置默认 features；未传时保留
+            # config.features（如 examples 的 features = ["performance"]）
+            if features:
+                config.features = features
 
             # 从配置加载插件（Nuitka 环境使用）
             if config.plugins.enabled:
@@ -190,7 +193,7 @@ async def run_async(
             # 远程校验
             async with ModrinthClient() as client:
                 report = await config_service.validate_remote(
-                    config, client, features=features
+                    config, client, features=features or None
                 )
                 if not report.is_valid:
                     raise click.ClickException(format_validation_issues(report.issues))

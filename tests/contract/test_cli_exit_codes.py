@@ -99,6 +99,77 @@ class TestExitCodes:
         result = runner.invoke(main, [config_file(VALID_CONFIG), "--dry-run"])
         assert result.exit_code == 0, result.output
 
+    def test_cli_no_feature_keeps_config_default(
+        self, runner, config_file, monkeypatch, mock_modrinth, tmp_path
+    ):
+        """未传 -f 时保留配置文件里的默认 features（不空列表覆盖）"""
+        monkeypatch.chdir(tmp_path)
+        captured = {}
+
+        async def fake_validate_remote(self, config, catalog, features=None):
+            captured["config_features"] = list(config.features)
+            captured["arg_features"] = features
+            return ConfigValidationResult(valid=True)
+
+        monkeypatch.setattr(
+            cli_module.ConfigService, "validate_remote", fake_validate_remote
+        )
+
+        config = f"""
+features = ["performance"]
+
+[minecraft]
+version = ["1.21.1"]
+mod_loader = "fabric"
+mods = ["sodium"]
+
+[output]
+download_dir = "{tmp_path}/dl"
+format = ["mrpack"]
+"""
+
+        result = runner.invoke(main, [config_file(config), "--dry-run"])
+        assert result.exit_code == 0, result.output
+        # 未覆盖 config.features；校验也未显式覆盖成空列表
+        assert captured["config_features"] == ["performance"]
+        assert captured["arg_features"] is None
+
+    def test_cli_feature_overrides_config_default(
+        self, runner, config_file, monkeypatch, mock_modrinth, tmp_path
+    ):
+        """显式传 -f 时覆盖配置默认 features"""
+        monkeypatch.chdir(tmp_path)
+        captured = {}
+
+        async def fake_validate_remote(self, config, catalog, features=None):
+            captured["config_features"] = list(config.features)
+            captured["arg_features"] = features
+            return ConfigValidationResult(valid=True)
+
+        monkeypatch.setattr(
+            cli_module.ConfigService, "validate_remote", fake_validate_remote
+        )
+
+        config = f"""
+features = ["performance"]
+
+[minecraft]
+version = ["1.21.1"]
+mod_loader = "fabric"
+mods = ["sodium"]
+
+[output]
+download_dir = "{tmp_path}/dl"
+format = ["mrpack"]
+"""
+
+        result = runner.invoke(
+            main, [config_file(config), "-f", "shaders", "--dry-run"]
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["config_features"] == ["shaders"]
+        assert captured["arg_features"] == ["shaders"]
+
     def test_cli_download_failure_nonzero(
         self, runner, config_file, monkeypatch, mock_modrinth, tmp_path
     ):

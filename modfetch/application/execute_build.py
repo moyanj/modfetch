@@ -138,7 +138,8 @@ class ExecuteBuild:
 
                 # -- 1. 下载到全局缓存 --
                 report = await self._download_target(
-                    plan, target, layout, job_id, event_sink
+                    plan, target, layout, job_id, event_sink,
+                    max_concurrent=max_concurrent,
                 )
                 logger.debug(
                     f"[执行] target {target.dir_name} 下载报告: "
@@ -232,12 +233,17 @@ class ExecuteBuild:
         layout: BuildLayout,
         job_id: str,
         event_sink: EventSink,
+        max_concurrent: int,
     ):
         """把 target 的全部制品下载到全局缓存（build/cache/）
 
         缓存键（cache_parts）基于内容 sha1 或 URL 摘要寻址：
         - 需真实文件（zip / mrpack-download）时才下载
         - mrpack reference 模式 catalog 制品不需实体文件，忽略下载
+
+        Args:
+            max_concurrent: 本次执行的下载并发上限
+                （来自 BuildOptions，缺省回落构造器默认值）
         """
         needs_download = self._needs_download(plan, target)
 
@@ -276,7 +282,7 @@ class ExecuteBuild:
 
         executor = DownloadExecutor(
             self._downloader,
-            max_concurrent=self._max_concurrent,
+            max_concurrent=max_concurrent,
             progress=on_progress,
             on_task_event=on_task_event,
         )
@@ -330,6 +336,13 @@ class ExecuteBuild:
             if artifact.origin == "catalog" and not needs_download:
                 continue
             cache_path = layout.cache_path_for(artifact)
+            # 缓存文件缺失（下载失败或缓存被清/损坏）：下载阶段已记为
+            # E300 错误，这里直接跳过，不再重复报误导性 E400 物化失败
+            if not cache_path.exists():
+                logger.warning(
+                    f"[物化] 缓存缺失，跳过: {artifact.filename} ({cache_path})"
+                )
+                continue
             dest = layout.workspace_for(target, artifact.destination)
             dest.parent.mkdir(parents=True, exist_ok=True)
             try:
@@ -373,7 +386,7 @@ class ExecuteBuild:
 
 
 async def _link_artifact(src: Path, dest: Path) -> None:
-    """把缓存文件硬链接到工作区（异步语义壳，实际同步 os.link）
+    """把缓存文件硬链接到工作区（os.link 瞬时元数据操作，无阻塞）
 
     失败抛 LayoutError——不静默复制，共享缓存语义保持严格：
         - EXDEV（跨设备）：cache 与工作区不在同一文件系统
@@ -390,8 +403,12 @@ async def _link_artifact(src: Path, dest: Path) -> None:
 
 
 async def _copy_artifact(src: Path, dest: Path) -> None:
-    """把缓存文件复制到工作区（显式 --link-mode copy 时使用）"""
-    shutil.copy2(src, dest)
+    """把缓存文件复制到工作区（显式 --link-mode copy 时使用）
+
+    copy2 需读取整个文件（可到 GB 级），放入线程池执行，
+    避免物化大制品时阻塞事件循环（Web 多 job 并发同进程时尤其关键）。
+    """
+    await asyncio.to_thread(shutil.copy2, src, dest)
 
 
 async def _write_url_meta(
@@ -424,8 +441,8 @@ async def _write_url_meta(
     os.replace(tmp, meta_path)
 
 
-async def _compute_sha1(path: Path) -> str:
-    """计算文件 sha1"""
+def _sha1_sync(path: Path) -> str:
+    """同步计算文件 sha1（供线程池执行，避免阻塞事件循环）"""
     import hashlib
 
     hasher = hashlib.sha1()
@@ -433,3 +450,8 @@ async def _compute_sha1(path: Path) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
+
+
+async def _compute_sha1(path: Path) -> str:
+    """计算文件 sha1（异步壳；同步逐块读取放入线程池）"""
+    return await asyncio.to_thread(_sha1_sync, path)
