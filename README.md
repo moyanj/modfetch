@@ -69,7 +69,7 @@ modfetch build   # 完事。去 downloads/dist/ 拿整合包。
 | 内容寻址缓存复用 | ✅ | ❌ | ⚠️ | ⚠️ | ⚠️ |
 | 插件扩展 | ✅ Python / Lua | ❌ | ❌ | ❌ | ❌ |
 | 适配 **Modrinth** | ✅ | ✅ | ✅ | ❌ | ⚠️ |
-| 适配 **CurseForge** | ✅ 可解析 | ✅ | ❌ | ✅ | ⚠️ |
+| 适配 **CurseForge** | ❌ | ✅ | ❌ | ✅ | ⚠️ |
 | 产出 `.mrpack` | ✅ download / reference | ✅ | ✅ | ❌ | ✅ |
 | 产出 CF `.zip` | ✅ | ✅ | ❌ | ✅ | ✅ |
 | 脚本化 / CI 集成 | ✅ | ✅ | ❌ | ❌ | ❌ |

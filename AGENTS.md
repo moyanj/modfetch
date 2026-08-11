@@ -80,14 +80,6 @@ uv run nuitka_build.py   # Nuitka → modfetch.bin（CI 同款；不是 python b
 - 裸 `# type: ignore`（无错误码）
 - `python build.py`（不存在）——构建脚本是 `nuitka_build.py`
 
-## KNOWN GOTCHAS (待修复)
-- `server/app.py` 静态挂载路径 `modfetch/server/app.py` 的 `parent.parent` = `modfetch/`，实际 `web/` 在项目根，路径应为 `parent.parent.parent`
-- `server/app.py` 的 CORS `allow_origins=["*"]` + `allow_credentials=True` 是非法组合（生命周期钩子已改用 lifespan，2026-08-11 修复）
-- **CI `build.yml` 名为 "Build and Test" 但不跑测试**（仅构建）
-- `web/` 前端未纳入 CI（无 Node/pnpm 步骤）
-- 领域纯净性 "AST-checked" 目前无落地检查文件；`_validate_plugin_source`（plugins/loader.py）是唯一 AST 检查
-- `ValidationError`（E500）与 `APIServerError`（HTTP 5xx）错误码冲突
-
 ## NOTES
 - 构建布局（新）：`download_dir` 根下固定 `build/cache`（全局内容寻址缓存，sha1/url 键）+ `build/{mc}-{loader}`（打包工作区，硬链接到 cache）+ `dist/`（唯一扁平交付目录）；路径计算集中 `application/build_layout.py`（BuildLayout）
 - 物化策略默认硬链接；`--link-mode copy` 显式切换复制；硬链接失败报错不静默复制（fail-fast 预检）
