@@ -23,7 +23,7 @@ from modfetch.application.config_service import ConfigService
 from modfetch.application.validation import format_validation_issues
 from modfetch.composition import create_build_service
 from modfetch.domain.config_models import ModFetchConfig
-from modfetch.domain.errors import ModFetchError, PluginError
+from modfetch.domain.errors import LockError, ModFetchError, PluginError
 from modfetch.logger import setup_logger
 from modfetch.plugins import PluginManager, PluginLoader
 from modfetch.plugins.lua_loader import LuaPluginLoader
@@ -252,18 +252,25 @@ async def run_build(
     plugins: list[str],
     plugin_dir: Optional[str],
     link_mode: str,
+    locked: bool,
 ):
     """执行完整构建（下载 + 打包）"""
     async with prepare_context(config_path, features, plugins, plugin_dir) as config:
         service = _create_service(config)
+        # 计算 lock 文件路径（配置同目录，名字=配置名去后缀+.lock.json）
+        from modfetch.application.build_layout import BuildLayout
+
+        layout = BuildLayout(config.output.download_dir)
+        lock_path = str(layout.lock_path_for(config_path))
         try:
             result = await service.execute(
                 config,
                 job_id="cli",
                 options=_build_options(config, link_mode),
+                locked=locked,
+                lock_path=lock_path,
             )
         finally:
-            # 释放 aiohttp session（catalog/downloader），避免连接池泄漏
             await service.close()
 
         if result.errors:
@@ -314,6 +321,97 @@ async def run_plan(
                     f.write(result.to_json())
             else:
                 click.echo(result.to_json())
+        finally:
+            await service.close()
+
+
+@_handle_cli_errors
+async def run_lock(
+    config_path: str,
+    features: list[str],
+    plugins: list[str],
+    plugin_dir: Optional[str],
+):
+    """仅生成 lock 文件（不下载/打包）"""
+    async with prepare_context(config_path, features, plugins, plugin_dir) as config:
+        service = _create_service(config)
+        try:
+            plan = await service.plan(config, job_id="cli")
+            from modfetch.application.build_layout import BuildLayout
+            from modfetch.application.lock_service import write_lock
+
+            layout = BuildLayout(config.output.download_dir)
+            lock_path = layout.lock_path_for(config_path)
+            written = write_lock(lock_path, plan, config, config_path)
+            logger.success(f"lock 文件已生成: {written}")
+        finally:
+            await service.close()
+
+
+@_handle_cli_errors
+async def run_update(
+    config_path: str,
+    features: list[str],
+    plugins: list[str],
+    plugin_dir: Optional[str],
+):
+    """强制重新解析并覆盖 lock，输出变更 diff"""
+    from datetime import datetime, timezone
+
+    from modfetch.application.lock_service import (
+        LockFile,
+        compute_fingerprint,
+        diff_locks,
+        read_lock,
+        write_lock,
+    )
+
+    async with prepare_context(config_path, features, plugins, plugin_dir) as config:
+        service = _create_service(config)
+        try:
+            from modfetch.application.build_layout import BuildLayout
+
+            layout = BuildLayout(config.output.download_dir)
+            lock_path = layout.lock_path_for(config_path)
+
+            # 读取旧 lock（如果存在）
+            old_lock: LockFile | None = None
+            try:
+                old_lock = read_lock(lock_path)
+            except LockError:
+                logger.info("[update] 无旧 lock 文件，将全新生成")
+
+            # 重新解析
+            new_plan = await service.plan(config, job_id="cli")
+
+            # 构造新 LockFile 用于 diff
+            new_lock = LockFile(
+                lock_version=1,
+                config_fingerprint=compute_fingerprint(config),
+                config_path=config_path,
+                features=tuple(config.features),
+                generated_at=datetime.now(timezone.utc).isoformat(),
+                plan=new_plan,
+            )
+
+            # 输出 diff
+            if old_lock is not None:
+                diff = diff_locks(old_lock, new_lock)
+                if diff.added:
+                    logger.info(f"[update] 新增模组: {', '.join(diff.added)}")
+                if diff.removed:
+                    logger.info(f"[update] 移除模组: {', '.join(diff.removed)}")
+                if diff.changed:
+                    for pid, old_url, new_url in diff.changed:
+                        logger.info(f"[update] 版本变更: {pid}")
+                        logger.info(f"  旧: {old_url}")
+                        logger.info(f"  新: {new_url}")
+                if not diff.added and not diff.removed and not diff.changed:
+                    logger.info("[update] 无变化")
+
+            # 覆盖写 lock
+            written = write_lock(lock_path, new_plan, config, config_path)
+            logger.success(f"lock 文件已更新: {written}")
         finally:
             await service.close()
 
@@ -400,7 +498,12 @@ def main():
     default="link",
     help="物化策略: link(硬链接到缓存,默认) / copy(复制)",
 )
-def build(config_path, features, plugins, plugin_dir, debug, link_mode):
+@click.option(
+    "--locked",
+    is_flag=True,
+    help="按 lock 文件构建（可离线解析、可复现）",
+)
+def build(config_path, features, plugins, plugin_dir, debug, link_mode, locked):
     """执行完整构建（下载 + 打包）"""
     _enable_debug(debug)
     asyncio.run(
@@ -410,6 +513,7 @@ def build(config_path, features, plugins, plugin_dir, debug, link_mode):
             list(plugins),
             plugin_dir,
             link_mode,
+            locked,
         )
     )
 
@@ -471,6 +575,46 @@ def plan(config_path, features, plugins, plugin_dir, output, debug):
             plugin_dir,
             output,
         )
+    )
+
+
+@main.command()
+@click.option(
+    "-c",
+    "--config",
+    "config_path",
+    default="mods.toml",
+    show_default=True,
+    help="配置文件路径（默认: 当前目录 mods.toml）",
+)
+@click.option("-f", "--feature", "features", multiple=True, help="启用的功能")
+@click.option("--plugin", "plugins", multiple=True, help="加载插件（可多次使用）")
+@click.option("--plugin-dir", help="插件目录路径")
+@click.option("--debug", is_flag=True, help="启用调试模式")
+def lock(config_path, features, plugins, plugin_dir, debug):
+    """生成 lock 文件（不下载/打包）"""
+    _enable_debug(debug)
+    asyncio.run(run_lock(config_path, list(features), list(plugins), plugin_dir))
+
+
+@main.command()
+@click.option(
+    "-c",
+    "--config",
+    "config_path",
+    default="mods.toml",
+    show_default=True,
+    help="配置文件路径（默认: 当前目录 mods.toml）",
+)
+@click.option("-f", "--feature", "features", multiple=True, help="启用的功能")
+@click.option("--plugin", "plugins", multiple=True, help="加载插件（可多次使用）")
+@click.option("--plugin-dir", help="插件目录路径")
+@click.option("--debug", is_flag=True, help="启用调试模式")
+def update(config_path, features, plugins, plugin_dir, debug):
+    """强制重新解析并更新 lock 文件，输出变更 diff"""
+    _enable_debug(debug)
+    asyncio.run(
+        run_update(config_path, list(features), list(plugins), plugin_dir)
     )
 
 

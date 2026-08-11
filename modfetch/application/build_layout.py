@@ -173,6 +173,18 @@ class BuildLayout:
         """dist/ 下最终产物路径：{output_name}.{format}"""
         return self.dist_dir / f"{spec.output_name}.{spec.format}"
 
+    def lock_path_for(self, config_path: str | Path) -> Path:
+        """配置文件对应的 lock 文件路径
+
+        约定：配置文件同目录，文件名 = 配置文件名去后缀 + ".lock.json"
+        （如 mods.toml → mods.lock.json）。
+
+        lock 文件是「配置的解析快照」，放在配置旁边便于版本控制与
+        多配置共存；不放入 download_dir（那是构建产物目录）。
+        """
+        config = Path(config_path).expanduser().resolve()
+        return config.parent / f"{config.stem}.lock.json"
+
 
 def clean_layout(layout: BuildLayout, *, cache: bool = False) -> list[Path]:
     """清理构建目录（显式命令，如 ``modfetch clean [--cache]``）

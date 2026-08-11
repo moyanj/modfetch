@@ -23,6 +23,16 @@ class BuildTarget:
         """下载目录名（沿用旧命名约定: {version}-{loader}）"""
         return f"{self.minecraft_version}-{self.loader.value}"
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "BuildTarget":
+        loader = ModLoader.from_value(d["loader"])
+        if loader is None:
+            raise ValueError(f"无效的 loader 值: {d['loader']!r}")
+        return cls(
+            minecraft_version=d["minecraft_version"],
+            loader=loader,
+        )
+
     def to_dict(self) -> dict:
         """序列化为纯 dict（枚举转 value，可 JSON 序列化）"""
         return {
@@ -58,6 +68,10 @@ class ArtifactCategory:
         """普通文件类别（不归入 mods/resourcepacks 子目录）"""
         return cls("file")
 
+    @classmethod
+    def from_dict(cls, v: str) -> "ArtifactCategory":
+        return cls(v)
+
     def to_dict(self) -> str:
         """序列化为纯值（类别本质是字符串包装）"""
         return self.value
@@ -81,6 +95,25 @@ class ResolvedArtifact:
     environment: Dict[str, str] = field(
         default_factory=lambda: {"client": "required", "server": "required"}
     )
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ResolvedArtifact":
+        return cls(
+            project_id=d["project_id"],
+            project_name=d["project_name"],
+            category=ArtifactCategory.from_dict(d["category"]),
+            filename=d["filename"],
+            url=d["url"],
+            hashes=d.get("hashes", {}),
+            destination=d["destination"],
+            target=BuildTarget.from_dict(d["target"]),
+            size=d.get("size", 0),
+            origin=d.get("origin", "catalog"),
+            environment=d.get(
+                "environment",
+                {"client": "required", "server": "required"},
+            ),
+        )
 
     def to_mrpack_entry(self) -> dict:
         """转换为 mrpack manifest files 条目（沿用旧格式契约）"""
@@ -123,6 +156,15 @@ class OutputSpec:
     output_name: str  #: 最终文件名（不含扩展名）
     mrpack_mode: str = "download"  #: 仅 mrpack 有效："download" / "reference"
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "OutputSpec":
+        return cls(
+            format=d["format"],
+            target=BuildTarget.from_dict(d["target"]),
+            output_name=d["output_name"],
+            mrpack_mode=d.get("mrpack_mode", "download"),
+        )
+
     def to_dict(self) -> dict:
         """序列化为纯 dict（可 JSON 序列化）"""
         return {
@@ -141,6 +183,21 @@ class BuildPlan:
     artifacts: Tuple[ResolvedArtifact, ...]  #: 全部待下载制品
     outputs: Tuple[OutputSpec, ...]  #: 全部输出规格
     metadata: Dict[str, str] = field(default_factory=dict)  #: 包元数据（名称/版本等）
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "BuildPlan":
+        return cls(
+            targets=tuple(
+                BuildTarget.from_dict(t) for t in d.get("targets", [])
+            ),
+            artifacts=tuple(
+                ResolvedArtifact.from_dict(a) for a in d.get("artifacts", [])
+            ),
+            outputs=tuple(
+                OutputSpec.from_dict(o) for o in d.get("outputs", [])
+            ),
+            metadata=d.get("metadata", {}),
+        )
 
     def artifacts_for(self, target: BuildTarget) -> Tuple[ResolvedArtifact, ...]:
         """返回属于指定 target 的制品"""

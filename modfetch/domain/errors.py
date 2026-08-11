@@ -197,6 +197,16 @@ class PluginError(ModFetchError):
         return "E600"
 
 
+class LockError(ModFetchError):
+    """Lock 文件相关错误（E700 段）
+
+    lock 文件缺失、格式无效、指纹不匹配、反序列化失败等统一归入此分支。
+    """
+
+    def _get_default_code(self) -> str:
+        return "E700"
+
+
 class ModrinthError(APIError):
     """Modrinth API 错误（向后兼容）
 
@@ -235,5 +245,6 @@ __all__ = [
     "ZipError",
     "ValidationError",
     "PluginError",
+    "LockError",
     "ModrinthError",
 ]
