@@ -42,3 +42,8 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = [
+    # starlette.testclient 的第三方弃用告警（httpx → httpx2 迁移预告），
+    # 位于 .venv 依赖内部，本项目无法修复，仅过滤
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning",
+]

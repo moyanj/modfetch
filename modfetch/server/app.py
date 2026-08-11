@@ -12,6 +12,8 @@ FastAPI 应用工厂
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -24,6 +26,19 @@ from modfetch.adapters.jobs import JobApplicationService
 from modfetch.adapters.modrinth import ModrinthClient
 from modfetch.server.routes import router as api_router
 from modfetch.server.ws import router as ws_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """应用生命周期钩子（替代弃用的 on_event）。
+
+    startup：输出启动日志；
+    shutdown：释放 catalog 持有的 Modrinth 连接。
+    """
+    logger.info("ModFetch API 服务启动")
+    yield
+    await app.state.catalog.close()
+    logger.info("ModFetch API 服务关闭")
 
 
 def create_app() -> FastAPI:
@@ -46,6 +61,7 @@ def create_app() -> FastAPI:
         title="ModFetch API",
         description="Minecraft 模组下载管理工具 - REST API",
         version=__version__,
+        lifespan=lifespan,
     )
 
     # CORS — 允许前端开发服务器访问
@@ -74,14 +90,5 @@ def create_app() -> FastAPI:
         logger.info(f"已挂载静态文件: {web_dist}")
     else:
         logger.debug(f"静态文件目录不存在，跳过挂载: {web_dist}")
-
-    @app.on_event("startup")
-    async def startup() -> None:
-        logger.info("ModFetch API 服务启动")
-
-    @app.on_event("shutdown")
-    async def shutdown() -> None:
-        await app.state.catalog.close()
-        logger.info("ModFetch API 服务关闭")
 
     return app

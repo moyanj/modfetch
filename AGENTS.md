@@ -82,7 +82,7 @@ uv run nuitka_build.py   # Nuitka → modfetch.bin（CI 同款；不是 python b
 
 ## KNOWN GOTCHAS (待修复)
 - `server/app.py` 静态挂载路径 `modfetch/server/app.py` 的 `parent.parent` = `modfetch/`，实际 `web/` 在项目根，路径应为 `parent.parent.parent`
-- `server/app.py` 用弃用的 `@app.on_event`；CORS `allow_origins=["*"]` + `allow_credentials=True` 是非法组合
+- `server/app.py` 的 CORS `allow_origins=["*"]` + `allow_credentials=True` 是非法组合（生命周期钩子已改用 lifespan，2026-08-11 修复）
 - **CI `build.yml` 名为 "Build and Test" 但不跑测试**（仅构建）
 - `web/` 前端未纳入 CI（无 Node/pnpm 步骤）
 - 领域纯净性 "AST-checked" 目前无落地检查文件；`_validate_plugin_source`（plugins/loader.py）是唯一 AST 检查

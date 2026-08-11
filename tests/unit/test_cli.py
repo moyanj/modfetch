@@ -505,9 +505,13 @@ class TestMainGuard:
         assert result.exit_code == 0, result.output
         assert "Usage" in result.output
 
-    def test_main_guard_via_runpy(self):
+    def test_main_guard_via_runpy(self, monkeypatch):
         """if __name__ == "__main__" → 直接以模块运行触发 main() 帮助输出"""
         import runpy
+        import sys
 
+        # runpy.run_module 在目标模块已位于 sys.modules（本文件顶部 import 了
+        # modfetch.cli）时会发出 RuntimeWarning；先摘除、结束由 monkeypatch 恢复
+        monkeypatch.delitem(sys.modules, "modfetch.cli", raising=False)
         with pytest.raises(SystemExit):
             runpy.run_module("modfetch.cli", run_name="__main__")
