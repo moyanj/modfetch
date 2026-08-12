@@ -34,6 +34,10 @@ class ProjectInfo:
     description: str  #: 项目简介
     project_type: ProjectType  #: 项目类别
     versions: List[str] = field(default_factory=list)  #: 可用版本号列表
+    downloads: int = 0  #: 总下载量（搜索/详情接口提供）
+    categories: List[str] = field(default_factory=list)  #: 分类与加载器标签
+    date_created: str = ""  #: 创建时间（ISO-8601）
+    date_modified: str = ""  #: 最近更新时间（ISO-8601）
 
 
 @dataclass

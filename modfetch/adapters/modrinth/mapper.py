@@ -29,29 +29,33 @@ def map_project(data: dict) -> ProjectInfo:
         description=data["description"],
         project_type=data["project_type"],
         versions=data["versions"],  # 该项目所有版本 id 列表
+        downloads=int(data.get("downloads", 0)),
+        categories=list(data.get("categories", [])),
+        date_created=data.get("date_created", ""),
+        date_modified=data.get("date_modified", ""),
     )
 
 
 def map_search_hit(item: dict) -> ProjectInfo:
-    """Modrinth search hit → ProjectInfo（附带 downloads 属性）
+    """Modrinth search hit → ProjectInfo
 
     与 ``map_project`` 的差异：搜索接口的每条 hit 字段精简且命名
     不同（如 ``project_id`` 而非 ``id``、无 ``versions`` 列表），
     故统一用 ``get`` 取默认值，避免缺字段时整个搜索失败。
-    额外把 ``downloads``（下载量，用于排序/展示）动态附加到模型上——
-    领域模型没有该字段，因此用 ``setattr`` 而不是修改 dataclass。
+    版本/分类/时间等展示字段沿用 API 原值，downloads 为正式字段。
     """
-    project = ProjectInfo(
+    return ProjectInfo(
         id=item.get("project_id", ""),
         name=item.get("slug", ""),
         title=item.get("title", ""),
         description=item.get("description", ""),
         project_type=item.get("project_type", ""),
-        versions=[],  # 搜索响应不含版本列表，置空
+        versions=list(item.get("versions", [])),  # hit 仅含支持的 MC 版本
+        downloads=int(item.get("downloads", 0)),
+        categories=list(item.get("categories", [])),
+        date_created=item.get("date_created", ""),
+        date_modified=item.get("date_modified", ""),
     )
-    # 下载量不在 ProjectInfo 定义中，动态扩展避免改动领域模型
-    setattr(project, "downloads", int(item.get("downloads", 0)))
-    return project
 
 
 def map_version(data: dict) -> VersionInfo:

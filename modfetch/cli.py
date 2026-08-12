@@ -7,6 +7,7 @@ CLI 模块（适配层）
 """
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from functools import wraps
 from pathlib import Path
@@ -24,6 +25,7 @@ from modfetch.application.validation import format_validation_issues
 from modfetch.composition import create_build_service
 from modfetch.domain.config_models import ModFetchConfig
 from modfetch.domain.errors import LockError, ModFetchError, PluginError
+from modfetch.domain.models import ProjectType
 from modfetch.logger import setup_logger
 from modfetch.plugins import PluginManager, PluginLoader
 from modfetch.plugins.lua_loader import LuaPluginLoader
@@ -458,6 +460,85 @@ async def run_clean(config_path: str, clean_cache: bool):
         logger.info("[清理] 无内容可清理")
 
 
+def _project_type_str(project_type) -> str:
+    """归一化项目类型为字符串（兼容枚举与原生字符串）
+
+    search 的 hit 经 map_search_hit 映射后 project_type 为原生
+    字符串（如 "mod"/"resourcepack"），但领域模型注解为
+    ProjectType 枚举，此处兼容两种形态以免强转报错。
+    """
+    if isinstance(project_type, ProjectType):
+        return project_type.value
+    return str(project_type)
+
+
+@_handle_cli_errors
+async def run_search(
+    query: str,
+    project_type: Optional[str],
+    mc_version: Optional[str],
+    loader: Optional[str],
+    limit: int,
+    as_json: bool,
+):
+    """在 Modrinth 上搜索模组并展示结果
+
+    不依赖配置文件，直接经 ModrinthClient.search 查询；
+    过滤条件（项目类型 / MC 版本 / 加载器）透传给 facets。
+    """
+    async with ModrinthClient() as client:
+        hits = await client.search(
+            query,
+            project_type=project_type,
+            mc_version=mc_version,
+            loader=loader,
+            limit=limit,
+        )
+
+    if not hits:
+        # 空结果属于正常业务结果而非错误（CatalogPort 契约），正常退出
+        click.echo(f"未找到匹配的模组: {query}")
+        return
+
+    if as_json:
+        result = [
+            {
+                "slug": hit.name,
+                "title": hit.title,
+                "project_type": _project_type_str(hit.project_type),
+                "description": hit.description,
+                "downloads": hit.downloads,
+                "versions": hit.versions,
+                "categories": hit.categories,
+                "date_created": hit.date_created,
+                "date_modified": hit.date_modified,
+            }
+            for hit in hits
+        ]
+        click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    click.echo(f"搜索 '{query}' 找到 {len(hits)} 个结果:")
+    for hit in hits:
+        click.echo(
+            f"  {hit.title} ({hit.name}) · {_project_type_str(hit.project_type)}"
+            f" · {hit.downloads:,} 下载"
+        )
+        meta = []
+        if hit.categories:
+            meta.append(f"分类: {', '.join(hit.categories)}")
+        if hit.versions:
+            versions = ", ".join(hit.versions[:8])
+            suffix = "…" if len(hit.versions) > 8 else ""
+            meta.append(f"MC: {versions}{suffix}")
+        if hit.date_modified:
+            meta.append(f"更新: {hit.date_modified[:10]}")
+        if meta:
+            click.echo(f"    {' · '.join(meta)}")
+        if hit.description:
+            click.echo(f"    {hit.description}")
+
+
 # ---------------------------------------------------------------------------
 # 子命令定义
 # ---------------------------------------------------------------------------
@@ -475,7 +556,7 @@ def _enable_debug(debug: bool) -> None:
 def main():
     """ModFetch - Minecraft 模组下载管理工具
 
-    子命令: build / plan / check / plugins / clean
+    子命令: build / plan / check / lock / update / plugins / search / clean
     """
 
 
@@ -626,6 +707,34 @@ def plugins(plugins, plugin_dir, debug):
     """列出已加载的插件"""
     _enable_debug(debug)
     asyncio.run(run_plugins(list(plugins), plugin_dir))
+
+
+@main.command()
+@click.argument("query")
+@click.option(
+    "--type",
+    "project_type",
+    type=click.Choice(["mod", "resourcepack", "shader", "datapack"]),
+    default=None,
+    help="项目类型过滤: mod / resourcepack / shader / datapack",
+)
+@click.option("--mc-version", help="Minecraft 版本过滤（如 1.21.1）")
+@click.option("--loader", help="加载器过滤（如 fabric/forge/neoforge）")
+@click.option(
+    "--limit",
+    default=5,
+    show_default=True,
+    type=click.IntRange(0, 100),
+    help="返回结果条数（0-100）",
+)
+@click.option("--json", "as_json", is_flag=True, help="以 JSON 格式输出结果")
+@click.option("--debug", is_flag=True, help="启用调试模式")
+def search(query, project_type, mc_version, loader, limit, as_json, debug):
+    """在 Modrinth 上搜索模组"""
+    _enable_debug(debug)
+    asyncio.run(
+        run_search(query, project_type, mc_version, loader, limit, as_json)
+    )
 
 
 @main.command()

@@ -127,7 +127,8 @@ uv run modfetch build -c other.toml   # 指定其他配置文件
 完成后，整合包就在 `./downloads/dist/` 里等你。🎉
 
 > 💡 其他命令：`modfetch check` 只校验不下载 · `modfetch plan -o plan.json` 生成构建计划 ·
-> `-f <feature>` 切换功能形态 · `modfetch clean --cache` 清理下载缓存
+> `-f <feature>` 切换功能形态 · `modfetch search <关键词>` 在 Modrinth 搜索模组（支持 `--type`/`--mc-version`/`--loader` 过滤）·
+> `modfetch clean --cache` 清理下载缓存
 
 ---
 

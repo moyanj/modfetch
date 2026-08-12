@@ -18,6 +18,7 @@ import pytest
 from click.testing import CliRunner
 
 import modfetch.cli as cli_module
+from modfetch.adapters.modrinth import ModrinthClient
 from modfetch.application.validation import ConfigValidationResult, ValidationIssue
 from modfetch.cli import main
 from modfetch.domain.errors import ModFetchError
@@ -396,6 +397,83 @@ class TestPluginsCommand:
 
 
 # ---------------------------------------------------------------------------
+# search 子命令
+# ---------------------------------------------------------------------------
+
+
+class TestSearchCommand:
+    def test_search_results(self, runner, mock_modrinth):
+        """search 命中结果 → 展示 title/slug/类型/下载量/元信息"""
+        result = runner.invoke(main, ["search", "sodium"])
+        assert result.exit_code == 0, result.output
+        assert "搜索 'sodium' 找到 1 个结果" in result.output
+        assert "Sodium" in result.output
+        assert "(sodium)" in result.output
+        assert "30,000,000 下载" in result.output
+        # 元信息行：分类 / MC 版本（截断）/ 更新日期
+        assert "分类: fabric, performance" in result.output
+        assert "MC: 1.21.1, 1.21, 1.20.6, 1.20.4, 1.20.1, 1.19.4, 1.19.2, 1.18.2…" in result.output
+        assert "更新: 2024-07-15" in result.output
+
+    def test_search_empty_returns_zero_exit(self, runner, monkeypatch):
+        """search 无结果 → 提示未找到且退出码 0（空结果是正常业务结果）"""
+        async def _empty_search(self, query, **kwargs):
+            return []
+
+        monkeypatch.setattr(ModrinthClient, "search", _empty_search)
+        result = runner.invoke(main, ["search", "ghost-mod"])
+        assert result.exit_code == 0, result.output
+        assert "未找到匹配的模组" in result.output
+
+    def test_search_json_output(self, runner, mock_modrinth):
+        """search --json → stdout 输出可解析的 JSON（含 slug/title/downloads）"""
+        result = runner.invoke(main, ["search", "sodium", "--json"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["slug"] == "sodium"
+        assert data[0]["title"] == "Sodium"
+        assert data[0]["downloads"] == 30_000_000
+        assert data[0]["categories"] == ["fabric", "performance"]
+        assert "1.21.1" in data[0]["versions"]
+        assert data[0]["date_created"].startswith("2020-06-01")
+        assert data[0]["date_modified"].startswith("2024-07-15")
+
+    def test_search_filters_passed_through(self, runner, monkeypatch):
+        """search --type/--mc-version/--loader/--limit → 透传给 client.search"""
+
+        async def _spy_search(self, query, *, project_type=None, mc_version=None,
+                             loader=None, limit=5):
+            seen.append((query, project_type, mc_version, loader, limit))
+            return []
+
+        seen = []
+        monkeypatch.setattr(ModrinthClient, "search", _spy_search)
+        result = runner.invoke(
+            main,
+            [
+                "search",
+                "sodium",
+                "--type",
+                "mod",
+                "--mc-version",
+                "1.21.1",
+                "--loader",
+                "fabric",
+                "--limit",
+                "10",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert seen == [("sodium", "mod", "1.21.1", "fabric", 10)]
+
+    def test_search_debug_flag(self, runner, mock_modrinth):
+        """search --debug → 启用调试日志"""
+        result = runner.invoke(main, ["search", "sodium", "--debug"])
+        assert result.exit_code == 0, result.output
+
+
+# ---------------------------------------------------------------------------
 # clean 子命令
 # ---------------------------------------------------------------------------
 
@@ -496,6 +574,7 @@ class TestMainGuard:
             ["check", "--help"],
             ["plan", "--help"],
             ["plugins", "--help"],
+            ["search", "--help"],
             ["clean", "--help"],
         ],
     )

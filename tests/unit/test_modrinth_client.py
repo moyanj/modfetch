@@ -226,8 +226,11 @@ class TestSearch:
         hit = results[0]
         assert hit.id == "AAAA0001"
         assert hit.name == "sodium"
-        # downloads 由 mapper 动态 setattr 附加，非 ProjectInfo 静态字段
-        assert getattr(hit, "downloads") == 30000000
+        assert hit.downloads == 30000000
+        assert hit.categories == ["fabric", "performance"]
+        assert hit.versions[0] == "1.21.1"
+        assert hit.date_created.startswith("2020-06-01")
+        assert hit.date_modified.startswith("2024-07-15")
 
         url, kwargs = session.calls[0]
         assert url == f"{MODRINTH_BASE_URL}/search"

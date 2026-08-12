@@ -10,6 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 import modfetch.cli as cli_module
+from modfetch.adapters.modrinth import ModrinthClient
 from modfetch.application.validation import ConfigValidationResult
 from modfetch.cli import main
 
@@ -227,3 +228,18 @@ format = ["mrpack"]
 
         result = runner.invoke(main, ["build", "-c", config_file(config)])
         assert result.exit_code != 0
+
+    def test_cli_search_exit_zero(self, runner, mock_modrinth):
+        """search 命中结果 → exit code 0"""
+        result = runner.invoke(main, ["search", "sodium"])
+        assert result.exit_code == 0, result.output
+
+    def test_cli_search_empty_exit_zero(self, runner, monkeypatch):
+        """search 无结果 → exit code 0（空列表是正常业务结果，非错误）"""
+
+        async def _empty_search(self, query, **kwargs):
+            return []
+
+        monkeypatch.setattr(ModrinthClient, "search", _empty_search)
+        result = runner.invoke(main, ["search", "ghost-mod"])
+        assert result.exit_code == 0, result.output
