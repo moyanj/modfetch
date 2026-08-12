@@ -12,6 +12,7 @@
 """
 
 import json
+from pathlib import Path
 
 import click
 import pytest
@@ -474,6 +475,106 @@ class TestSearchCommand:
 
 
 # ---------------------------------------------------------------------------
+# add 子命令
+# ---------------------------------------------------------------------------
+
+
+def _add_config(mods: str = '["sodium"]') -> str:
+    return (
+        "# 测试配置\n"
+        "[minecraft]\n"
+        'version = ["1.21.1"]\n'
+        'mod_loader = "fabric"\n'
+        f"mods = {mods}\n"
+        "[output]\n"
+        'download_dir = "downloads"\n'
+        'format = ["mrpack"]\n'
+    )
+
+
+class TestAddCommand:
+    def test_add_yes_appends_slug(self, runner, config_file, monkeypatch, mock_modrinth, tmp_path):
+        """add --yes → 直接添加第一条结果 slug 到配置 mods 列表"""
+        monkeypatch.chdir(tmp_path)
+        cfg = config_file(_add_config(mods="[]"))
+        result = runner.invoke(main, ["add", "sodium", "--yes", "-c", cfg])
+        assert result.exit_code == 0, result.output
+        assert "已添加 Sodium (sodium)" in result.output
+        content = Path(cfg).read_text(encoding="utf-8")
+        # 注释保留 + slug 追加
+        assert "# 测试配置" in content
+        assert 'mods = ["sodium"]' in content
+
+    def test_add_duplicate_skips(self, runner, config_file, monkeypatch, mock_modrinth, tmp_path):
+        """配置已含该 slug → 跳过且不改动文件"""
+        monkeypatch.chdir(tmp_path)
+        cfg = config_file(_add_config())
+        result = runner.invoke(main, ["add", "sodium", "--yes", "-c", cfg])
+        assert result.exit_code == 0, result.output
+        assert "sodium 已在配置中，跳过" in result.output
+
+    def test_add_empty_result_zero_exit(self, runner, config_file, monkeypatch, tmp_path):
+        """搜索无结果 → 提示未找到且退出码 0，不改动配置"""
+        monkeypatch.chdir(tmp_path)
+        cfg = config_file(_add_config())
+
+        async def _empty_search(self, query, **kwargs):
+            return []
+
+        monkeypatch.setattr(ModrinthClient, "search", _empty_search)
+        result = runner.invoke(main, ["add", "ghost-mod", "--yes", "-c", cfg])
+        assert result.exit_code == 0, result.output
+        assert "未找到匹配的模组" in result.output
+        assert "sodium" in Path(cfg).read_text(encoding="utf-8")
+
+    def test_add_missing_config_nonzero(self, runner, monkeypatch, tmp_path):
+        """配置文件不存在 → 退出码非 0"""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(
+            main, ["add", "sodium", "--yes", "-c", str(tmp_path / "nope.toml")]
+        )
+        assert result.exit_code != 0
+
+    def test_add_interactive_choice(self, runner, config_file, monkeypatch, mock_modrinth, tmp_path):
+        """交互模式：输入序号选择对应结果并写入"""
+        monkeypatch.chdir(tmp_path)
+        # 交互需 TTY；CliRunner 会替换 stdin，故 monkeypatch 辅助判断
+        monkeypatch.setattr(cli_module, "_interactive_available", lambda: True)
+        cfg = config_file(_add_config(mods="[]"))
+
+        # mock_modrinth 返回 1 条结果，输入 1 选中
+        result = runner.invoke(
+            main, ["add", "sodium", "-c", cfg], input="1\n"
+        )
+        assert result.exit_code == 0, result.output
+        assert "已添加 Sodium (sodium)" in result.output
+
+    def test_add_interactive_cancel(self, runner, config_file, monkeypatch, mock_modrinth, tmp_path):
+        """交互模式：输入 0 → 取消且不改动配置"""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(cli_module, "_interactive_available", lambda: True)
+        cfg = config_file(_add_config())
+        before = Path(cfg).read_text(encoding="utf-8")
+
+        result = runner.invoke(
+            main, ["add", "sodium", "-c", cfg], input="0\n"
+        )
+        assert result.exit_code == 0, result.output
+        assert "已取消，未修改配置" in result.output
+        assert Path(cfg).read_text(encoding="utf-8") == before
+
+    def test_add_non_tty_without_yes(self, runner, config_file, monkeypatch, tmp_path):
+        """非 TTY 且未加 --yes → 报错提示用 --yes，不挂起"""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(cli_module, "_interactive_available", lambda: False)
+        cfg = config_file(_add_config())
+
+        result = runner.invoke(main, ["add", "sodium", "-c", cfg])
+        assert result.exit_code != 0
+        assert "--yes" in result.output
+
+
+# ---------------------------------------------------------------------------
 # clean 子命令
 # ---------------------------------------------------------------------------
 
@@ -575,6 +676,7 @@ class TestMainGuard:
             ["plan", "--help"],
             ["plugins", "--help"],
             ["search", "--help"],
+            ["add", "--help"],
             ["clean", "--help"],
         ],
     )

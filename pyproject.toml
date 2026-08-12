@@ -17,6 +17,7 @@ dependencies = [
     "lupa>=2.6",
     "pyyaml>=6.0.2",
     "tomli>=2.0 ; python_full_version < '3.11'",
+    "tomlkit>=0.15.1",
     "uvicorn[standard]>=0.49.0",
     "websockets>=16.0",
     "xmltodict>=0.14.2",
