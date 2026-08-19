@@ -1,9 +1,10 @@
 # =====================================================================
-# ModFetch 条件编译示例（only_version + feature）
+# ModFetch 条件编译示例（only_version + only_loader + feature）
 #
-# 用途：展示 how 同一份配置按「Minecraft 版本」与「功能标签」精确
-# 控制哪些模组进入构建。执行时用 -f/--feature 启停功能组：
+# 用途：展示 how 同一份配置按「Minecraft 版本」「加载器」与「功能标签」
+# 精确控制哪些模组进入构建。执行时用 -f/--feature 启停功能组：
 #     uv run modfetch examples/mods_conditional.toml -f performance -f shaders
+# 多加载器（mod_loader 数组）时，only_loader 条目只进入匹配的加载器产物。
 # =====================================================================
 
 # 全局功能标签（根表键，必须放在所有 [table] 之前）
@@ -18,14 +19,15 @@ verify_ssl = true
 [metadata]
 name = "Conditions Pack"
 version = "2.0.0"
-description = "演示 only_version 与 feature 条件过滤"
+description = "演示 only_version / only_loader / feature 条件过滤"
 
 [minecraft]
 version = [
     "1.21.1",
     "1.20.4",
 ]
-mod_loader = "fabric"
+# 双加载器：fabric 与 forge 各构建一份产物
+mod_loader = ["fabric", "forge"]
 
 mods = [
     # —— 简洁写法：无条件，全部版本/加载器都构建 ——
@@ -36,12 +38,17 @@ mods = [
     { id = "spark", only_version = "1.21.1" },            # 只在 1.21.1
     { id = "sodium-extra", only_version = ["1.21.1"] },   # 数组写法等价
 
+    # —— only_loader：仅指定加载器生效（多加载器构建时按加载器分流）——
+    { id = "iris", only_loader = "fabric" },              # fabric 产物用 iris
+    { id = "oculus", only_loader = "forge" },             # forge 产物用 oculus
+    { id = "fabric-api", only_loader = ["fabric", "quilt"] },  # 列表命中其一即可
+
     # —— feature：启用该功能标签才生效（AND 语义）——
     { id = "lithium", feature = "performance" },          # -f performance 时生效
     { id = "entityculling", feature = ["performance"] },
 
-    # —— only_version + feature 组合：需同时满足（AND）——
-    { id = "iris", feature = "shaders" },  # 光影加载器: 全版本生效（真实支持 1.21.1/1.20.4）
+    # —— 多条件组合：需同时满足（AND）——
+    { id = "modernfix", only_version = "1.21.1", feature = "performance" },
 
     # —— version：固定版本号（默认取该组合下的最新兼容版本）——
     { slug = "fabric-api", version = "0.116.15+1.21.1", only_version = "1.21.1" },  # 固定版本+限定版本
@@ -53,9 +60,10 @@ resourcepacks = [
     { id = "fast-better-grass", feature = "performance" },
 ]
 
-# 光影包：需 mods 含 iris/oculus/optifine 之一（本地校验强制）
+# 光影包：需 mods 含 iris/oculus/optifine 之一（本地校验强制，
+# 逐 版本×加载器 组合独立判定）
 shaderpacks = [
-    { id = "complementary-reimagined", feature = "shaders" },
+    { id = "complementary-reimagined", feature = "shaders", only_loader = "fabric" },
 ]
 
 [output]

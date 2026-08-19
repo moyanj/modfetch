@@ -165,6 +165,7 @@ description = "包含高性能和高质量光影模组的 Minecraft 整合方案
 | `id`, `slug`   | string                  | 模组唯一标识，优先使用 Modrinth 的项目 ID 或 slug           |
 | `version`      | string（可选）          | 固定版本号（默认取该 MC 版本×加载器下的最新版本）           |
 | `only_version` | Array<String> 或 string （可选）| 当 Minecraft 版本匹配时才下载      |
+| `only_loader`  | Array<String> 或 string （可选）| 仅指定的加载器（fabric/forge/neoforge/quilt）下生效 |
 | `feature`      | Array<String> 或 string （可选） | 运行时特征标记（启用条件，见下）            |
 
 > **版本固定（`slug@version` 语法）**
@@ -177,13 +178,17 @@ description = "包含高性能和高质量光影模组的 Minecraft 整合方案
 >   才会被采用（如 `"1.21.1"` 目标下 `"1.20.4"` 独占的版本不会被选到）
 > - 该语法同样适用于 `resourcepacks` 与 `shaderpacks` 条目
 
-> **条件编译语义（`only_version` 与 `feature`）**
+> **条件编译语义（`only_version` / `only_loader` 与 `feature`）**
 > - `only_version`：条目仅在声明的 Minecraft 版本下生效；列表时命中其一即可
+> - `only_loader`：条目仅在声明的加载器下生效（`fabric`/`forge`/`neoforge`/
+>   `quilt`，大小写不敏感）；列表时命中其一即可。多加载器构建
+>   （`mod_loader = ["fabric", "forge"]`）时，条目只进入匹配的加载器产物
 > - `feature`：条目仅在**所有**声明的 feature 都被启用时才生效（AND 语义）；
 >   未声明 `feature` 的条目始终包含
-> - 二者组合时需**同时满足**（AND）
-> - 判定方式：CLI 的 `-f/--feature` 或配置顶层 `features` 提供启用列表；
->   构建计划（`plan_build`）与本地校验共用同一过滤逻辑，保证行为一致
+> - 多条件组合时需**同时满足**（AND）
+> - 判定方式：加载器由构建目标自动提供（无需手动指定）；
+>   feature 由 CLI 的 `-f/--feature` 或配置顶层 `features` 提供启用列表；
+>   构建计划（`plan_build`）与本地/远程校验共用同一过滤逻辑，保证行为一致
 > - 注意：历史版本曾存在过滤失效/反向语义缺陷，现统一为"启用条件"语义
 
 #### **高级字段：`extra_urls`（额外文件）**
@@ -198,6 +203,7 @@ description = "包含高性能和高质量光影模组的 Minecraft 整合方案
 | `type`         | string         | 指定文件类型：`mod`, `resourcepack`, `shaderpack`, `file` |
 | `sha1`         | string（可选） | SHA1 校验，防止文件重复或损坏                             |
 | `only_version` | string 或 Array<String>（可选） | 指定版本触发下载的条件             |
+| `only_loader`  | string 或 Array<String>（可选） | 仅指定加载器（fabric/forge/neoforge/quilt）下触发下载 |
 | `feature`      | string 或 Array<String>（可选） | 运行时特征筛选                      |
 
 > **目的地约定**：`type = "file"` 的文件放入整合包根目录（`overrides/` 根）；
@@ -210,10 +216,12 @@ description = "包含高性能和高质量光影模组的 Minecraft 整合方案
 `iris`、`oculus`、`optifine`（`oculus` 与 `iris` 等价——它是 iris 的
 Forge/NeoForge 移植版）。
 
-- 该约束在**本地校验阶段**即检查（不依赖网络）：若某 Minecraft 版本下
-  存在实际生效（未被 `only_version`/`feature` 过滤掉）的光影包，但
-  `mods` 中没有对应生效的光影加载器，则以错误码 `E102` 提前终止，不会
-  静默跳过
+- 该约束在**本地校验阶段**即检查（不依赖网络）：若某 Minecraft 版本×加载器
+  组合下存在实际生效（未被 `only_version`/`only_loader`/`feature` 过滤掉）
+  的光影包，但 `mods` 中没有对应生效的光影加载器，则以错误码 `E102`
+  提前终止，不会静默跳过。多加载器构建时逐组合独立判定——例如
+  `mod_loader = ["fabric", "forge"]` 且 `iris` 声明 `only_loader = "fabric"`、
+  `oculus` 声明 `only_loader = "forge"` 时，两个组合各自满足约束
 - 光影包在 Modrinth 解析时**以实际配置的光影加载器作为 loader 过滤**，
   匹配光影包版本声明的兼容加载器；未配置加载器时不过滤 loader
 
@@ -240,8 +248,10 @@ mods = [
     # 用 dict 形式指定详细参数
     { id = "sodium", only_version = "1.21.7", feature = "performance" },
     { id = "lithium", feature = ["performance"] },
-    { id = "iris", feature = "shaders" },
-    # 简写形式（默认适用于所有版本、所有已启用 feature）
+    { id = "iris", feature = "shaders", only_loader = "fabric" },
+    { id = "oculus", only_loader = "forge" },        # 加载器分流：forge 用 oculus
+    { id = "fabric-api", only_loader = ["fabric", "quilt"] },
+    # 简写形式（默认适用于所有版本、所有加载器、所有已启用 feature）
     "modmenu",
     "rei",
     # 简写 + 版本固定（等价于 { id = "fabric-api", version = "0.100.0" }）
@@ -409,6 +419,6 @@ modfetch plugins --plugin-dir ./plugins   # 查看指定目录下加载了哪些
 
 - 仅可使用 `Modrinth` 的项目 ID 或 slug。
 - 如果配置复杂，建议分开 `[from]` 文件用于模块化管理。
-- `only_version` 和 `feature` 字段非常适合用于根据不同场景（如性能、美观、教育）组织模组依赖。
+- `only_version`、`only_loader` 和 `feature` 字段非常适合用于根据不同场景（版本、加载器、性能/美观/教育等形态）组织模组依赖。
 - 配置了光影包时记得在 `mods` 中放入对应的光影加载器（`iris` / `oculus` / `optifine`），否则本地校验会拒绝该配置。
 - 需要分发"轻量"整合包时，使用 `mrpack_modes = ["reference"]`；需要开箱即用时用 `["download"]`。

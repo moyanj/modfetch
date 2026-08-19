@@ -1,10 +1,12 @@
-"""条件编译（feature/only_version）在计划生成层面的组合测试
+"""条件编译（feature/only_version/only_loader）在计划生成层面的组合测试
 
 锁定契约: mods / resourcepacks / shaderpacks / extra_urls 四类条目
 在 PlanBuild 生成计划时统一经 should_include 过滤:
     - only_version: 版本命中才包含（列表命中其一即可）
+    - only_loader: 加载器命中才包含（列表命中其一即可；多加载器构建时
+      仅进入匹配的 target）
     - feature: 声明的功能标签全部启用才包含（AND）
-    - 两类条件组合亦为 AND；字符串条目无条件, 始终包含
+    - 三类条件组合亦为 AND；字符串条目无条件, 始终包含
 
 背景: should_include 曾对对象条目过滤完全失效（isinstance 分支不命中），
 导致带 feature 的条目被无条件下构建。本套用例在完整计划链路验证
@@ -32,6 +34,26 @@ async def _plan_names(
         config, features=active
     )
     return {a.project_name for a in plan.artifacts}
+
+
+async def _plan_by_target(
+    stub_catalog, make_config_dict, mc: dict, active=None, **config_kw
+) -> dict:
+    """生成计划并按 target.dir_name（{mc版本}-{loader}）分组制品项目名"""
+    config = ModFetchConfig.from_dict(
+        make_config_dict(minecraft=mc, **config_kw)
+    )
+    plan, _ = await PlanBuild(catalog=stub_catalog).execute(
+        config, features=active
+    )
+    grouped: dict = {}
+    for target in plan.targets:
+        grouped[target.dir_name] = {
+            a.project_name
+            for a in plan.artifacts
+            if a.target == target
+        }
+    return grouped
 
 
 class TestFeatureGate:
@@ -203,3 +225,117 @@ class TestAllCategories:
         assert await _plan_names(
             stub_catalog, make_config_dict, mc, active=["f"]
         ) == {"sodium", expected_name}
+
+
+class TestOnlyLoaderGate:
+    """only_loader 在多加载器构建中仅进入匹配 target"""
+
+    async def test_loader_gate_per_target(
+        self, stub_catalog, make_config_dict
+    ):
+        """only_loader 条目仅出现在匹配加载器的 target"""
+        stub_catalog.add_project("sodium", "sodium")
+        stub_catalog.add_project("oculus", "oculus")
+        mc = {
+            "mod_loader": ["fabric", "forge"],
+            "mods": [
+                "sodium",
+                {"id": "oculus", "only_loader": "forge"},
+            ],
+        }
+
+        by_target = await _plan_by_target(stub_catalog, make_config_dict, mc)
+        assert by_target["1.21.1-fabric"] == {"sodium"}
+        assert by_target["1.21.1-forge"] == {"sodium", "oculus"}
+
+    async def test_loader_list_any_match(
+        self, stub_catalog, make_config_dict
+    ):
+        """only_loader 列表命中其一即进入对应 target"""
+        stub_catalog.add_project("sodium", "sodium")
+        stub_catalog.add_project("shared", "shared")
+        mc = {
+            "mod_loader": ["fabric", "forge", "neoforge"],
+            "mods": [
+                "sodium",
+                {"id": "shared", "only_loader": ["fabric", "neoforge"]},
+            ],
+        }
+
+        by_target = await _plan_by_target(stub_catalog, make_config_dict, mc)
+        assert by_target["1.21.1-fabric"] == {"sodium", "shared"}
+        assert by_target["1.21.1-forge"] == {"sodium"}
+        assert by_target["1.21.1-neoforge"] == {"sodium", "shared"}
+
+    async def test_loader_combined_with_feature(
+        self, stub_catalog, make_config_dict
+    ):
+        """only_loader + feature 同时满足才包含（AND）"""
+        stub_catalog.add_project("sodium", "sodium")
+        stub_catalog.add_project("iris", "iris")
+        mc = {
+            "mod_loader": ["fabric", "forge"],
+            "mods": [
+                "sodium",
+                {
+                    "id": "iris",
+                    "only_loader": "fabric",
+                    "feature": "shaders",
+                },
+            ],
+        }
+
+        # feature 未启用 → 全部 target 均无 iris
+        by_target = await _plan_by_target(
+            stub_catalog, make_config_dict, mc, active=[]
+        )
+        assert by_target["1.21.1-fabric"] == {"sodium"}
+        assert by_target["1.21.1-forge"] == {"sodium"}
+        # feature 启用 → 仅 fabric target 含 iris
+        by_target = await _plan_by_target(
+            stub_catalog, make_config_dict, mc, active=["shaders"]
+        )
+        assert by_target["1.21.1-fabric"] == {"sodium", "iris"}
+        assert by_target["1.21.1-forge"] == {"sodium"}
+
+    async def test_loader_gate_applies_to_resourcepacks(
+        self, stub_catalog, make_config_dict
+    ):
+        """资源包同样按加载器过滤"""
+        stub_catalog.add_project("sodium", "sodium")
+        stub_catalog.add_project("faithful", "faithful")
+        mc = {
+            "mod_loader": ["fabric", "forge"],
+            "mods": ["sodium"],
+            "resourcepacks": [
+                {"id": "faithful", "only_loader": "fabric"},
+            ],
+        }
+
+        by_target = await _plan_by_target(stub_catalog, make_config_dict, mc)
+        assert by_target["1.21.1-fabric"] == {"sodium", "faithful"}
+        assert by_target["1.21.1-forge"] == {"sodium"}
+
+    async def test_loader_gate_applies_to_shaderpacks(
+        self, stub_catalog, make_config_dict
+    ):
+        """光影包按加载器过滤（配合加载器匹配场景）"""
+        stub_catalog.add_project("sodium", "sodium")
+        stub_catalog.add_project("iris", "iris")
+        stub_catalog.add_project("complementary", "complementary")
+        mc = {
+            "mod_loader": ["fabric", "forge"],
+            "mods": [
+                "sodium",
+                # fabric 用 iris，forge 用 oculus 光影加载器
+                {"id": "iris", "only_loader": "fabric"},
+            ],
+            "shaderpacks": [
+                {"id": "complementary", "only_loader": "fabric"},
+            ],
+        }
+
+        by_target = await _plan_by_target(stub_catalog, make_config_dict, mc)
+        assert by_target["1.21.1-fabric"] == {"sodium", "iris", "complementary"}
+        # forge target 无光影包也无 iris（两者均被 only_loader 过滤）
+        assert by_target["1.21.1-forge"] == {"sodium"}

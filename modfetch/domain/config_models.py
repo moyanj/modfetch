@@ -95,12 +95,15 @@ class ConditionalEntry:
 
     为各配置项提供通用条件字段：
     - only_version: 仅指定的 Minecraft 版本生效
+    - only_loader: 仅指定的加载器生效（fabric/forge/neoforge/quilt，
+      列表时命中其一即可）
     - feature: 仅指定的功能标签启用时生效（由 --feature 传入）
 
-    计划生成阶段会根据这些条件对条目进行过滤。
+    计划生成阶段会根据这些条件对条目进行过滤；多条件组合为 AND。
     """
 
     only_version: Optional[Union[str, List[str]]] = None
+    only_loader: Optional[Union[str, List[str]]] = None
     feature: Optional[Union[str, List[str]]] = None
 
 
@@ -386,6 +389,7 @@ class ModFetchConfig:
                         slug=entry.get("slug"),
                         version=entry.get("version"),
                         only_version=entry.get("only_version"),
+                        only_loader=entry.get("only_loader"),
                         feature=entry.get("feature"),
                     )
                 )
@@ -406,6 +410,7 @@ class ModFetchConfig:
                         type=FileType(url_entry.get("type", "file")),
                         sha1=url_entry.get("sha1"),
                         only_version=url_entry.get("only_version"),
+                        only_loader=url_entry.get("only_loader"),
                         feature=url_entry.get("feature"),
                     )
                 )
@@ -626,6 +631,7 @@ class ModFetchConfig:
                         "type": url.type.value,
                         "sha1": url.sha1,
                         "only_version": url.only_version,
+                        "only_loader": url.only_loader,
                         "feature": url.feature,
                     }
                     for url in self.minecraft.extra_urls
@@ -679,6 +685,8 @@ class ModFetchConfig:
                     entry_dict["version"] = entry.version
                 if entry.only_version:
                     entry_dict["only_version"] = entry.only_version
+                if entry.only_loader:
+                    entry_dict["only_loader"] = entry.only_loader
                 if entry.feature:
                     entry_dict["feature"] = entry.feature
                 result.append(entry_dict)

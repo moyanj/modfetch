@@ -194,14 +194,19 @@ class ProjectValidationService:
         pinned_version = entry.version if isinstance(entry, ModEntry) else None
 
         # 版本×加载器兼容性检查并发执行。
-        # 按版本粒度先过 only_version/feature 条件过滤：仅当条目在
-        # 该版本实际生效时，才要求存在可用版本（与计划生成阶段
-        # VersionMatcher.should_include 一致，避免误报不兼容）。
+        # 先按 (version, loader) 组合粒度过 only_version/only_loader/feature
+        # 条件过滤：仅当条目在该组合实际生效时，才要求存在可用版本（与
+        # 计划生成阶段 VersionMatcher.should_include 一致，避免误报不兼容）。
+        # 资源包/光影包传入的 loader 为空串（无加载器上下文）→ 转 None，
+        # 声明 only_loader 的条目因此不参与兼容性检查（由计划阶段判定）。
         applied_features = features or []
-        pending_versions = [
-            mc_version
+        pending_combos = [
+            (mc_version, loader)
             for mc_version in mc_versions
-            if self._matcher.should_include(entry, mc_version, applied_features)
+            for loader in loaders
+            if self._matcher.should_include(
+                entry, mc_version, applied_features, loader or None
+            )
         ]
 
         async def _check(mc_version: str, loader: str) -> Optional[str]:
@@ -217,8 +222,7 @@ class ProjectValidationService:
 
         checks = [
             _check(mc_version, loader)
-            for mc_version in pending_versions
-            for loader in loaders
+            for mc_version, loader in pending_combos
         ]
         incompatible = [r for r in await asyncio.gather(*checks) if r is not None]
 

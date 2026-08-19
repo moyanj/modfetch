@@ -85,35 +85,39 @@ class ConfigService:
         """跨字段关联校验: 有实际参与的光影包 → mods 必须含光影加载器
 
         光影包（如 Complementary / BSL）必须配合光影加载器（iris/oculus/
-        optifine）才能生效。按 Minecraft 版本粒度判断：仅当某版本下经
-        feature/only_version 过滤后仍有实际参与的光影包时，才要求该版本
-        的 mods 中存在光影加载器（加载器本身同样需通过条件过滤）。
+        optifine）才能生效。按 Minecraft 版本×加载器组合粒度判断：仅当某
+        (version, loader) 组合下经 feature/only_version/only_loader 过滤
+        后仍有实际参与的光影包时，才要求该组合的 mods 中存在光影加载器
+        （加载器本身同样需通过条件过滤）。
 
         Raises:
-            ValueError: 某版本含光影包但缺少对应的光影加载器
+            ValueError: 某 (version, loader) 组合含光影包但缺少对应的
+                光影加载器
         """
         matcher = VersionMatcher()
         for version in config.minecraft.version:
-            active_shaders = [
-                s
-                for s in config.minecraft.shaderpacks
-                if matcher.should_include(s, version, features)
-            ]
-            if not active_shaders:
-                continue
-            # 该版本有实际参与的光影包，要求 mods 含等于的光影加载器
-            has_loader = any(
-                (entry_identifier(m) or "").lower() in SHADER_LOADER_SLUGS
-                and matcher.should_include(m, version, features)
-                for m in config.minecraft.mods
-            )
-            if not has_loader:
-                raise ValueError(
-                    f"Minecraft {version} 配置了光影包 "
-                    f"{', '.join(str(s) for s in active_shaders)}，"
-                    f"mods 必须包含光影加载器 "
-                    f"({'/'.join(SHADER_LOADER_SLUGS)})"
+            for loader in config.minecraft.loaders():
+                loader_value = loader.value
+                active_shaders = [
+                    s
+                    for s in config.minecraft.shaderpacks
+                    if matcher.should_include(s, version, features, loader_value)
+                ]
+                if not active_shaders:
+                    continue
+                # 该组合有实际参与的光影包，要求 mods 含等于的光影加载器
+                has_loader = any(
+                    (entry_identifier(m) or "").lower() in SHADER_LOADER_SLUGS
+                    and matcher.should_include(m, version, features, loader_value)
+                    for m in config.minecraft.mods
                 )
+                if not has_loader:
+                    raise ValueError(
+                        f"Minecraft {version}/{loader_value} 配置了光影包 "
+                        f"{', '.join(str(s) for s in active_shaders)}，"
+                        f"mods 必须包含光影加载器 "
+                        f"({'/'.join(SHADER_LOADER_SLUGS)})"
+                    )
 
     async def validate_remote(
         self,

@@ -233,9 +233,10 @@ class PlanBuild:
 
         # 模组（含依赖）
         for mod in config.minecraft.mods:
-            if not self._should_include(mod, version, features):
+            if not self._should_include(mod, version, features, loader.value):
                 logger.debug(
-                    f"[计划] {target.dir_name} 跳过模组(版本/feature 过滤): {mod}"
+                    f"[计划] {target.dir_name} 跳过模组"
+                    f"(版本/加载器/feature 过滤): {mod}"
                 )
                 continue
 
@@ -328,10 +329,11 @@ class PlanBuild:
                     )
                 )
 
-        # 光影加载器（iris/oculus/optifine，本版本生效者）——用于光影包
-        # 版本查询时作为 loader 过滤（Modrinth 光影包版本按 loading 声明兼容性）
+        # 光影加载器（iris/oculus/optifine，本版本×加载器生效者）——用于
+        # 光影包版本查询时作为 loader 过滤（Modrinth 光影包版本按 loading
+        # 声明兼容性）
         shader_loader = self._active_shader_loader_slug(
-            config, version, features
+            config, version, features, loader.value
         )
 
         # 资源包 / 光影包
@@ -340,10 +342,10 @@ class PlanBuild:
             (config.minecraft.shaderpacks, ArtifactCategory.shaderpacks()),
         ):
             for entry in entries:
-                if not self._should_include(entry, version, features):
+                if not self._should_include(entry, version, features, loader.value):
                     logger.debug(
                         f"[计划] {target.dir_name} 跳过 {category.value}: "
-                        f"{entry} (版本/feature 过滤)"
+                        f"{entry} (版本/加载器/feature 过滤)"
                     )
                     continue
                 # 资源包不区分加载器，传空 loader；光影包按实际配置的光影
@@ -370,10 +372,10 @@ class PlanBuild:
 
         # 额外 URL
         for extra in config.minecraft.extra_urls:
-            if not self._should_include(extra, version, features):
+            if not self._should_include(extra, version, features, loader.value):
                 logger.debug(
-                    f"[计划] {target.dir_name} 跳过 extra_url(版本/feature 过滤): "
-                    f"{extra.url}"
+                    f"[计划] {target.dir_name} 跳过 extra_url"
+                    f"(版本/加载器/feature 过滤): {extra.url}"
                 )
                 continue
             artifacts.append(self._make_extra_url_artifact(target, extra))
@@ -440,20 +442,23 @@ class PlanBuild:
         entry: Union[str, ModEntry, ExtraUrl],
         version: str,
         features: List[str],
+        loader: str,
     ) -> bool:
-        """按版本与功能标签过滤条目（委托 VersionMatcher）"""
-        return self._version_matcher.should_include(entry, version, features)
+        """按版本、加载器与功能标签过滤条目（委托 VersionMatcher）"""
+        return self._version_matcher.should_include(entry, version, features, loader)
 
     def _active_shader_loader_slug(
         self,
         config: ModFetchConfig,
         version: str,
         features: List[str],
+        loader: str,
     ) -> str:
-        """返回当前版本/功能标签下生效的光影加载器 slug（iris/oculus/optifine）
+        """返回当前版本×加载器/功能标签下生效的光影加载器 slug（iris/oculus/optifine）
 
-        在 mods 中查找声明为光影加载器的条目（需通过 only_version/feature
-        条件过滤）；未找到返回空字符串，此时光影包版本查询不过滤 loader。
+        在 mods 中查找声明为光影加载器的条目（需通过 only_version/
+        only_loader/feature 条件过滤）；未找到返回空字符串，此时光影包
+        版本查询不过滤 loader。
         """
         for mod in config.minecraft.mods:
             if isinstance(mod, ModEntry):
@@ -461,7 +466,7 @@ class PlanBuild:
             else:
                 slug = mod
             if slug and slug.lower() in SHADER_LOADER_SLUGS and self._should_include(
-                mod, version, features
+                mod, version, features, loader
             ):
                 return slug.lower()
         return ""

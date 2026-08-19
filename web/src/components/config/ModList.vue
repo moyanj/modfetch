@@ -83,6 +83,7 @@ function getConditions(item: string | ModEntry): string[] {
   const conds: string[] = [];
   if (item.version) conds.push(`固定版本: ${item.version}`);
   if (item.only_version) conds.push(`MC: ${Array.isArray(item.only_version) ? item.only_version.join(', ') : item.only_version}`);
+  if (item.only_loader) conds.push(`加载器: ${Array.isArray(item.only_loader) ? item.only_loader.join(', ') : item.only_loader}`);
   if (item.feature) conds.push(`特性: ${Array.isArray(item.feature) ? item.feature.join(', ') : item.feature}`);
   return conds;
 }
@@ -226,6 +227,14 @@ async function fetchSuggestions(query: string) {
                 :model-value="formatMultiValue(asEntry(item).only_version)"
                 placeholder="例如 1.20.1, 1.21.1"
                 @update:model-value="val => updateField(index, { only_version: parseMultiValue(val) })"
+              />
+            </div>
+            <div class="mod-list__field">
+              <label class="mod-list__label">仅限加载器</label>
+              <McInput
+                :model-value="formatMultiValue(asEntry(item).only_loader)"
+                placeholder="例如 fabric, forge"
+                @update:model-value="val => updateField(index, { only_loader: parseMultiValue(val) })"
               />
             </div>
             <div class="mod-list__field">

@@ -11,6 +11,7 @@ export interface ModEntry {
   slug?: string;
   version?: string;
   only_version?: string | string[];
+  only_loader?: string | string[];
   feature?: string | string[];
 }
 
@@ -20,6 +21,7 @@ export interface ExtraUrl {
   type?: FileType;
   sha1?: string;
   only_version?: string | string[];
+  only_loader?: string | string[];
   feature?: string | string[];
 }
 

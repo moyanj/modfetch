@@ -3,6 +3,8 @@
 锁定契约（修复后）:
     - 支持 ConditionalEntry 对象（ModEntry/ExtraUrl）、dict 与字符串
     - only_version: 版本命中指定列表才包含
+    - only_loader: 加载器命中指定列表才包含（列表命中其一即可）;
+      声明 only_loader 但无 loader 上下文（None）时排除（保守）
     - feature: 启用条件语义——条目声明的 feature 全部被启用才包含;
       未声明 feature 的条目始终包含
 
@@ -78,3 +80,69 @@ class TestShouldIncludeDict:
         assert not matcher.should_include(
             {"id": "x", "feature": "shaders"}, "1.21.1", []
         )
+
+
+class TestOnlyLoaderGate:
+    def test_loader_match_included(self):
+        """only_loader 命中 → 包含"""
+        matcher = VersionMatcher()
+        entry = ModEntry(id="x", only_loader="fabric")
+        assert matcher.should_include(entry, "1.21.1", [], "fabric")
+
+    def test_loader_mismatch_excluded(self):
+        """only_loader 未命中 → 排除"""
+        matcher = VersionMatcher()
+        entry = ModEntry(id="x", only_loader="fabric")
+        assert not matcher.should_include(entry, "1.21.1", [], "forge")
+
+    def test_loader_list_any_match(self):
+        """only_loader 列表命中其一 → 包含"""
+        matcher = VersionMatcher()
+        entry = ModEntry(id="x", only_loader=["fabric", "forge"])
+        assert matcher.should_include(entry, "1.21.1", [], "forge")
+        assert not matcher.should_include(entry, "1.21.1", [], "neoforge")
+
+    def test_loader_no_context_excluded(self):
+        """声明 only_loader 但无 loader 上下文（None）→ 保守排除"""
+        matcher = VersionMatcher()
+        entry = ModEntry(id="x", only_loader="fabric")
+        assert not matcher.should_include(entry, "1.21.1", [])
+
+    def test_loader_case_insensitive(self):
+        """加载器匹配大小写不敏感"""
+        matcher = VersionMatcher()
+        entry = ModEntry(id="x", only_loader="Fabric")
+        assert matcher.should_include(entry, "1.21.1", [], "fabric")
+
+    def test_loader_combined_with_version_and_feature(self):
+        """only_loader + only_version + feature 同时满足才包含（AND）"""
+        matcher = VersionMatcher()
+        entry = ModEntry(
+            id="x",
+            only_version="1.21.1",
+            only_loader="fabric",
+            feature="graphics",
+        )
+        assert matcher.should_include(
+            entry, "1.21.1", ["graphics"], "fabric"
+        )
+        assert not matcher.should_include(entry, "1.20.4", ["graphics"], "fabric")
+        assert not matcher.should_include(entry, "1.21.1", ["graphics"], "forge")
+        assert not matcher.should_include(entry, "1.21.1", [], "fabric")
+
+    def test_dict_only_loader(self):
+        """dict 条目 only_loader 同样生效"""
+        matcher = VersionMatcher()
+        assert matcher.should_include(
+            {"id": "x", "only_loader": "forge"}, "1.21.1", [], "forge"
+        )
+        assert not matcher.should_include(
+            {"id": "x", "only_loader": "forge"}, "1.21.1", [], "fabric"
+        )
+
+    def test_extra_url_only_loader(self):
+        """ExtraUrl 同样支持 only_loader"""
+        matcher = VersionMatcher()
+        entry = ExtraUrl(url="https://example.com/x.zip", only_loader="fabric")
+        assert matcher.should_include(entry, "1.21.1", [], "fabric")
+        assert not matcher.should_include(entry, "1.21.1", [], "forge")

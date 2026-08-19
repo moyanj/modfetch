@@ -41,11 +41,15 @@ class VersionMatcher:
         entry: Union[ConditionalEntry, dict, str],
         version: str,
         features: List[str],
+        loader: Optional[str] = None,
     ) -> bool:
         """判断项目是否应包含在当前构建中
 
         支持 ConditionalEntry(ModEntry/ExtraUrl) 对象、dict 与字符串条目：
         - only_version: 版本命中指定列表才包含
+        - only_loader: 加载器命中指定列表才包含（列表命中其一即可）；
+          条目声明了 only_loader 但未提供 loader 上下文（None）时排除，
+          避免无上下文时误包含
         - feature: 启用条件——条目声明的 feature 全部被启用才包含；
           未声明 feature 的条目始终包含（与 ConditionalEntry 文档一致）
 
@@ -56,9 +60,11 @@ class VersionMatcher:
         # 对象条目（ModEntry/ExtraUrl）与 dict 均提取条件字段；字符串无条件
         if isinstance(entry, ConditionalEntry):
             only_version = entry.only_version
+            only_loader = entry.only_loader
             cfg_features = entry.feature
         elif isinstance(entry, dict):
             only_version = entry.get("only_version")
+            only_loader = entry.get("only_loader")
             cfg_features = entry.get("feature")
         else:
             return True
@@ -73,6 +79,20 @@ class VersionMatcher:
             if version not in versions:
                 logger.debug(
                     f"[过滤] 排除 {entry}: only_version={versions} 不含 {version}"
+                )
+                return False
+
+        # only_loader: 加载器不匹配 → 排除；无 loader 上下文时保守排除
+        if only_loader:
+            loaders = (
+                [only_loader]
+                if isinstance(only_loader, str)
+                else list(only_loader)
+            )
+            normalized = [loader_val.lower() for loader_val in loaders]
+            if loader is None or loader.lower() not in normalized:
+                logger.debug(
+                    f"[过滤] 排除 {entry}: only_loader={normalized} 不含 {loader}"
                 )
                 return False
 
