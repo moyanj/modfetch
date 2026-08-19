@@ -9,6 +9,8 @@
 - from_dict 正确处理 format 为字符串的情况
 """
 
+import copy
+import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
@@ -153,12 +155,12 @@ class ParentConfig:
     """
 
     url: str = ""
-    format: str = "toml"  # toml/json/yaml/xml/mrpack
+    format: str = "toml"  # toml/json/yaml/mrpack（xml 未实现解析器，不列入）
 
     def __post_init__(self):
         if not self.url:
             raise ValueError("ParentConfig 必须提供 url")
-        if self.format not in ["toml", "json", "yaml", "xml", "mrpack"]:
+        if self.format not in ["toml", "json", "yaml", "mrpack"]:
             raise ValueError(f"不支持配置格式: {self.format}")
 
 
@@ -411,43 +413,193 @@ class ModFetchConfig:
                 raise ValueError(f"无效的 extra_urls 条目类型: {type(url_entry)}")
         return result
 
+    #: 全部合并指令（dict 中 $ 前缀键，必须独占整个 dict）
+    _MERGE_DIRECTIVES = frozenset({"$delete", "$replace", "$remove", "$override"})
+    #: 键级指令：作为某个键的值出现
+    _KEY_DIRECTIVES = frozenset({"$delete", "$replace"})
+    #: 列表项指令：作为列表元素出现
+    _LIST_DIRECTIVES = frozenset({"$remove", "$override"})
+
     @staticmethod
     def merge_dicts(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
         """合并两个配置字典（纯函数，供配置继承使用）
 
         规则:
         - dict 递归合并
-        - list 拼接去重（保持顺序）
+        - list 拼接去重（基于规范化身份标识，保持首次出现顺序）
         - 其他值 overlay 覆盖 base
         - "from" 键始终跳过
+        - 合并指令（详见 _directive_key）：
+          键级 { "$delete": true } 删除该键 / { "$replace": v } 整体替换；
+          列表项 { "$remove": x } 按身份删除 / { "$override": entry } 同身份替换
+
+        返回全新结构，与 base/overlay 不共享任何可变嵌套对象。
         """
-        result = base.copy()
+        result = copy.deepcopy(base)
 
         for key, value in overlay.items():
             if key == "from":
                 continue
 
-            if (
-                key in result
-                and isinstance(result[key], dict)
-                and isinstance(value, dict)
-            ):
-                result[key] = ModFetchConfig.merge_dicts(result[key], value)
-            elif (
-                key in result
-                and isinstance(result[key], list)
-                and isinstance(value, list)
-            ):
-                combined = result[key] + value
-                seen: List[Any] = []
-                for item in combined:
-                    if item not in seen:
-                        seen.append(item)
-                result[key] = seen
+            # 键级合并指令优先于常规合并
+            directive = ModFetchConfig._directive_key(value)
+            if directive is not None:
+                if directive not in ModFetchConfig._KEY_DIRECTIVES:
+                    raise ValueError(
+                        f"合并指令 {directive} 仅能用于列表元素，"
+                        f"不能作为键 {key!r} 的值"
+                    )
+                if directive == "$delete":
+                    result.pop(key, None)
+                else:  # $replace：整体替换，不走合并
+                    result[key] = copy.deepcopy(value[directive])
+                continue
+
+            if key in result:
+                base_value = result[key]
+                if isinstance(base_value, dict) and isinstance(value, dict):
+                    result[key] = ModFetchConfig.merge_dicts(base_value, value)
+                elif isinstance(base_value, list) and isinstance(value, list):
+                    result[key] = ModFetchConfig._merge_lists(base_value, value)
+                else:
+                    result[key] = copy.deepcopy(value)
+            elif isinstance(value, dict):
+                # 递归处理嵌套 dict 中可能出现的指令
+                result[key] = ModFetchConfig.merge_dicts({}, value)
+            elif isinstance(value, list):
+                # base 无此键仍需解析列表内指令（$remove 为 no-op，$override 转为追加）
+                result[key] = ModFetchConfig._merge_lists([], value)
             else:
-                result[key] = value
+                result[key] = copy.deepcopy(value)
 
         return result
+
+    @staticmethod
+    def _merge_lists(base: List[Any], overlay: List[Any]) -> List[Any]:
+        """合并两个列表：拼接去重，并应用 $remove/$override 指令
+
+        处理顺序：先在 base 上按身份应用删除与同身份替换（$override 保持
+        原位置），未命中 base 的 $override 追加到末尾，最后拼接 overlay
+        普通项并按身份去重。$remove 对同层 overlay 新增项同样生效。
+        """
+        removals: set[str] = set()
+        override_map: Dict[str, Any] = {}
+        override_order: List[str] = []
+        additions: List[Any] = []
+
+        # 扫描 overlay，分离指令与普通项
+        for item in overlay:
+            directive = ModFetchConfig._directive_key(item)
+            if directive is None:
+                additions.append(item)
+                continue
+            if directive not in ModFetchConfig._LIST_DIRECTIVES:
+                raise ValueError(
+                    f"合并指令 {directive} 仅能作为键的值，不能用于列表元素"
+                )
+            if directive == "$remove":
+                targets = item[directive]
+                if not isinstance(targets, list):
+                    targets = [targets]
+                for target in targets:
+                    removals.add(ModFetchConfig._item_identity(target))
+            else:  # $override：同身份后者覆盖前者
+                entry = item[directive]
+                identity = ModFetchConfig._item_identity(entry)
+                if identity not in override_map:
+                    override_order.append(identity)
+                override_map[identity] = entry
+
+        seen: set[str] = set()
+        merged: List[Any] = []
+        consumed: set[str] = set()
+
+        # base：应用 $remove/$override（保持原位置），普通项去重保留
+        for item in base:
+            identity = ModFetchConfig._item_identity(item)
+            if identity in removals:
+                continue
+            if identity in override_map:
+                if identity not in seen:
+                    seen.add(identity)
+                    consumed.add(identity)
+                    merged.append(copy.deepcopy(override_map[identity]))
+                continue
+            if identity not in seen:
+                seen.add(identity)
+                merged.append(copy.deepcopy(item))
+
+        # 未命中 base 的 $override 追加到末尾（按声明顺序）
+        for identity in override_order:
+            if identity not in consumed and identity not in seen:
+                seen.add(identity)
+                merged.append(copy.deepcopy(override_map[identity]))
+
+        # overlay 普通项：$remove 命中的跳过，其余按身份去重追加
+        for item in additions:
+            identity = ModFetchConfig._item_identity(item)
+            if identity in removals:
+                continue
+            if identity not in seen:
+                seen.add(identity)
+                merged.append(copy.deepcopy(item))
+
+        return merged
+
+    @staticmethod
+    def _directive_key(value: Any) -> Optional[str]:
+        """识别合并指令：value 为含 $ 前缀键的 dict 时返回指令名，否则 None
+
+        指令必须独占整个 dict（不允许与其他键混用）；未知 $ 前缀键抛错，
+        防止指令拼写错误被静默当作普通数据处理。
+        """
+        if not isinstance(value, dict):
+            return None
+        dollar_keys = [
+            k for k in value if isinstance(k, str) and k.startswith("$")
+        ]
+        if not dollar_keys:
+            return None
+        if len(value) > 1:
+            raise ValueError(
+                f"合并指令必须独占整个字典，不允许与其他键混用: {dollar_keys}"
+            )
+        directive = dollar_keys[0]
+        if directive not in ModFetchConfig._MERGE_DIRECTIVES:
+            raise ValueError(
+                f"未知的合并指令: {directive}"
+                "（支持: $delete / $replace / $remove / $override）"
+            )
+        return directive
+
+    @staticmethod
+    def _item_identity(item: Any) -> str:
+        """返回列表项的规范化身份标识（用于去重与 $remove/$override 匹配）
+
+        模组/资源包/光影包列表项可能是字符串（slug）或 dict（含 id/slug）。
+        为使不同表示形式指向同一模组时能匹配，优先提取规范化标识：
+        - str → id:<slug>
+        - dict → 从 id/slug 提取（id 优先，slug 次之），与 str 形式同身份；
+          无 id/slug 时按 JSON 序列化内容标识
+        - 其他标量带类型前缀，避免 int 1 与 str "1" 互相误匹配
+        """
+        if isinstance(item, dict):
+            canonical = item.get("id") or item.get("slug")
+            if canonical:
+                return f"id:{canonical}"
+            return "dict:" + json.dumps(item, sort_keys=True, ensure_ascii=False)
+        if isinstance(item, str):
+            return f"id:{item}"
+        if isinstance(item, bool):
+            # bool 是 int 子类，必须先于 int 判断
+            return f"bool:{item}"
+        if isinstance(item, int):
+            return f"int:{item}"
+        if isinstance(item, float):
+            return f"float:{item}"
+        if item is None:
+            return "none:"
+        return f"other:{item}"
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""

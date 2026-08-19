@@ -49,7 +49,8 @@ async def load_config(config_path: str) -> ModFetchConfig:
 
     try:
         raw = dict(get_config_source(path).load(path))
-        return await load_with_inheritance(raw)
+        # base_path 使 file:// 相对引用基于配置文件所在目录解析
+        return await load_with_inheritance(raw, base_path=path.parent)
     except ValueError as e:
         raise click.ClickException(str(e)) from e
 
