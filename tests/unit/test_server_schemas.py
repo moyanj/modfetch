@@ -21,8 +21,8 @@ def test_create_job_request():
 
 
 def test_health_response():
-    model = schemas.HealthResponse(status="ok", version="1.0.1")
-    assert model.model_dump() == {"status": "ok", "version": "1.0.1"}
+    model = schemas.HealthResponse(status="ok", version="1.1.0")
+    assert model.model_dump() == {"status": "ok", "version": "1.1.0"}
 
 
 def test_validation_error_item_context_optional():

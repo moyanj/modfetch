@@ -5,7 +5,7 @@ ModFetch - Minecraft 模组下载管理工具
 （配置模型、构建服务、组合根、错误体系、logger）。
 """
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 
 # 初始化日志
 from modfetch.logger import setup_logger
